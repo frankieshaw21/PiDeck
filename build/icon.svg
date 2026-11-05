@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <rect width="1024" height="1024" rx="220" fill="#171a15"/>
+  <rect x="112" y="112" width="800" height="800" rx="180" fill="#d6f46e"/>
+  <text x="512" y="665" text-anchor="middle" font-family="Georgia, serif" font-size="560" font-weight="700" fill="#18200d">π</text>
+</svg>

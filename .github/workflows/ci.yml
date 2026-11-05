@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+          cache: npm
+      - run: npm ci
+      - run: npm install --global @earendil-works/pi-coding-agent@1.5.0
+      - run: npm run release:verify
+      - if: runner.os == 'macOS'
+        run: npm run smoke:desktop
+
+  package:
+    needs: test
+    strategy:
+      matrix:
+        include:
+          - os: macos-14
+            command: npm run dist:mac
+            artifact: release/*mac-arm64*
+          - os: windows-latest
+            command: npm run dist:win
+            artifact: release/*win-x64*
+          - os: ubuntu-latest
+            command: npm run dist:linux
+            artifact: release/*linux-x64*
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+          cache: npm
+      - run: npm ci
+      - run: npm install --global @earendil-works/pi-coding-agent@1.5.0
+      - run: ${{ matrix.command }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: minimal-pi-${{ runner.os }}
+          path: ${{ matrix.artifact }}
+          if-no-files-found: error

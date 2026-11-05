@@ -1,0 +1,6 @@
+node_modules/
+dist/
+dist-renderer/
+release/
+.minimal-pi-harness/
+*.log

@@ -1,0 +1,80 @@
+{
+  "name": "minimal-pi-desktop-harness",
+  "version": "0.1.0",
+  "description": "A minimal multi-session desktop harness for Pi Coding Agent",
+  "author": "Minimal Pi Harness contributors",
+  "private": true,
+  "type": "module",
+  "main": "dist/desktop/main.js",
+  "scripts": {
+    "build": "npm run build:node && npm run build:renderer",
+    "build:node": "tsc -p tsconfig.json",
+    "build:renderer": "vite build",
+    "dev": "npm run build:node && concurrently -k \"vite\" \"wait-on tcp:5173 && VITE_DEV_SERVER_URL=http://localhost:5173 electron .\"",
+    "start": "npm run build && electron .",
+    "smoke:desktop": "npm run build && HARNESS_SMOKE_TEST=1 electron .",
+    "test": "npm run build:node && node --test dist/**/*.test.js",
+    "probe": "npm run build:node && node dist/probe.js",
+    "probe:real": "npm run build:node && node dist/real-model-probe.js",
+    "probe:compat": "npm run build:node && node dist/compatibility-probe.js",
+    "release:verify": "npm run build && npm test",
+    "release:verify:desktop": "npm run release:verify && npm run smoke:desktop",
+    "release:verify:full": "npm run release:verify:desktop && npm run probe:compat",
+    "pack": "npm run release:verify && electron-builder --dir",
+    "dist:mac": "npm run release:verify && electron-builder --mac dmg zip --arm64",
+    "dist:mac:signed": "npm run release:verify && electron-builder --mac dmg zip --arm64 --config.mac.notarize=true",
+    "dist:win": "npm run release:verify && electron-builder --win nsis zip --x64",
+    "dist:linux": "npm run release:verify && electron-builder --linux AppImage deb --x64"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.19",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.2.1",
+    "concurrently": "^10.0.6",
+    "electron": "^45.2.3",
+    "electron-builder": "^26.18.0",
+    "typescript": "5.9.3",
+    "vite": "^8.3.6",
+    "wait-on": "^9.0.1"
+  },
+  "dependencies": {
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "build": {
+    "appId": "com.minimalpi.harness",
+    "productName": "Minimal Pi Harness",
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+    "asar": true,
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-renderer/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "hardenedRuntime": true,
+      "icon": "build/icon.png",
+      "target": ["dmg", "zip"]
+    },
+    "win": {
+      "icon": "build/icon.png",
+      "target": ["nsis", "zip"]
+    },
+    "linux": {
+      "category": "Development",
+      "icon": "build/icon.png",
+      "target": ["AppImage", "deb"]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": false
+    }
+  }
+}
