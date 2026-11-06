@@ -10,10 +10,10 @@
     "build": "npm run build:node && npm run build:renderer",
     "build:node": "tsc -p tsconfig.json",
     "build:renderer": "vite build",
-    "dev": "npm run build:node && concurrently -k \"vite\" \"wait-on tcp:5173 && VITE_DEV_SERVER_URL=http://localhost:5173 electron .\"",
+    "dev": "npm run build:node && concurrently -k \"vite\" \"wait-on tcp:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron .\"",
     "start": "npm run build && electron .",
-    "smoke:desktop": "npm run build && HARNESS_SMOKE_TEST=1 electron .",
-    "test": "npm run build:node && node --test dist/**/*.test.js",
+    "smoke:desktop": "npm run build && cross-env HARNESS_SMOKE_TEST=1 electron .",
+    "test": "npm run build:node && node --test dist",
     "probe": "npm run build:node && node dist/probe.js",
     "probe:real": "npm run build:node && node dist/real-model-probe.js",
     "probe:compat": "npm run build:node && node dist/compatibility-probe.js",
@@ -27,11 +27,13 @@
     "dist:linux": "npm run release:verify && electron-builder --linux AppImage deb --x64"
   },
   "devDependencies": {
+    "@types/cross-spawn": "^6.0.6",
     "@types/node": "22.19.19",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.2.1",
     "concurrently": "^10.0.6",
+    "cross-env": "^10.1.0",
     "electron": "^45.2.3",
     "electron-builder": "^26.18.0",
     "typescript": "5.9.3",
@@ -39,8 +41,13 @@
     "wait-on": "^9.0.1"
   },
   "dependencies": {
+    "cross-spawn": "^7.0.6",
+    "dompurify": "^3.4.17",
+    "mermaid": "^12.3.0",
     "react": "^19.3.1",
-    "react-dom": "^19.3.1"
+    "react-dom": "^19.3.1",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
   },
   "build": {
     "appId": "com.minimalpi.harness",
@@ -60,16 +67,25 @@
       "category": "public.app-category.developer-tools",
       "hardenedRuntime": true,
       "icon": "build/icon.png",
-      "target": ["dmg", "zip"]
+      "target": [
+        "dmg",
+        "zip"
+      ]
     },
     "win": {
       "icon": "build/icon.png",
-      "target": ["nsis", "zip"]
+      "target": [
+        "nsis",
+        "zip"
+      ]
     },
     "linux": {
       "category": "Development",
       "icon": "build/icon.png",
-      "target": ["AppImage", "deb"]
+      "target": [
+        "AppImage",
+        "deb"
+      ]
     },
     "nsis": {
       "oneClick": false,

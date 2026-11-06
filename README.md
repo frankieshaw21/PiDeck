@@ -33,6 +33,9 @@ supplies desktop interaction and explicit multi-session execution control.
 
 The packaged application does not bundle or replace Pi. It uses `PI_PATH`, the Pi
 managed launcher, or `pi` on `PATH`, so existing Pi configuration is preserved.
+On Windows, install Pi with npm and ensure its global bin directory is on `PATH`,
+or set `PI_PATH` to the full path of `pi.cmd` before launching the application.
+Restart the application after changing environment variables.
 
 ## Commands
 

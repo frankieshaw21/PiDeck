@@ -27,6 +27,10 @@ export interface PiSessionState {
   model?: { provider: string; id: string; name?: string };
 }
 
+export interface ContextUsage { tokens: number | null; contextWindow: number; percent: number | null }
+
+export interface ImageAttachment { type: "image"; mimeType: "image/png" | "image/jpeg" | "image/gif" | "image/webp"; data: string }
+
 export type PromptDisposition = "started" | "queued" | "handled";
 
 export interface RuntimeEvent {
@@ -39,10 +43,12 @@ export interface RuntimeEvent {
 export interface PiRuntimeAdapter {
   readonly harnessSessionId: string;
   start(): Promise<PiSessionState>;
-  prompt(message: string): Promise<{ disposition: PromptDisposition; runId: string }>;
+  prompt(message: string, images?: ImageAttachment[]): Promise<{ disposition: PromptDisposition; runId: string }>;
   abort(): Promise<void>;
   getState(): Promise<PiSessionState>;
   getMessages(): Promise<unknown[]>;
+  getEntries(): Promise<{ entries: Record<string, unknown>[]; leafId: string | null }>;
+  getContextUsage(): Promise<ContextUsage | null>;
   setSessionName(name: string): Promise<void>;
   getAvailableModels(): Promise<Array<{ provider: string; id: string; name?: string }>>;
   getCommands(): Promise<Array<{ name: string; source: "extension" | "prompt" | "skill"; description?: string }>>;

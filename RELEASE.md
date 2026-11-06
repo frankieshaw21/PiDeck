@@ -42,3 +42,6 @@ Never commit signing certificates, passwords, API tokens, or notarization creden
 5. Restart the app and confirm history recovery.
 6. Exercise model switching and an Extension UI dialog.
 7. Confirm quit stops active work and no Pi child process remains.
+8. On Windows, install Pi globally with npm, launch the packaged app, and repeat
+   these checks with a project path containing spaces. Also check `PI_PATH` with
+   an explicit path to `pi.cmd`.

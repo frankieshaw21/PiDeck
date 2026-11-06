@@ -19,6 +19,7 @@ interface HarnessIndex { version: 1; sessions: HarnessSessionMetadata[] }
 export interface SessionManagerOptions {
   storageDir: string;
   piPath?: string;
+  extensionPaths?: () => string[];
   adapterFactory?: (options: PiRpcAdapterOptions) => PiRuntimeAdapter;
 }
 
@@ -27,6 +28,7 @@ export class HarnessSessionManager {
   readonly #indexPath: string;
   readonly #piSessionDir: string;
   readonly #piPath: string | undefined;
+  readonly #extensionPaths: () => string[];
   readonly #adapterFactory: (options: PiRpcAdapterOptions) => PiRuntimeAdapter;
   readonly #sessions = new Map<string, HarnessSessionMetadata>();
   readonly #runtimes = new Map<string, PiRuntimeAdapter>();
@@ -36,6 +38,7 @@ export class HarnessSessionManager {
     this.#indexPath = join(options.storageDir, "sessions.json");
     this.#piSessionDir = join(options.storageDir, "pi-sessions");
     this.#piPath = options.piPath;
+    this.#extensionPaths = options.extensionPaths ?? (() => []);
     this.#adapterFactory = options.adapterFactory ?? ((adapterOptions) => new PiRpcAdapter(adapterOptions));
   }
 
@@ -144,6 +147,8 @@ export class HarnessSessionManager {
       piSessionId: metadata.piSessionId,
       projectDir: metadata.projectDir,
       sessionDir: this.#piSessionDir,
+      contextDir: join(this.#storageDir, "context-edits"),
+      extraArgs: this.#extensionPaths().flatMap((path) => ["--extension", path]),
       ...(this.#piPath ? { piPath: this.#piPath } : {}),
     });
   }

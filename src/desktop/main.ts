@@ -1,19 +1,35 @@
-import { access, stat } from "node:fs/promises";
+import { access, stat, readFile, writeFile, mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
-import { isAbsolute, join } from "node:path";
-import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { isAbsolute, join, basename } from "node:path";
+import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import { HarnessSessionManager } from "../core/session-manager.js";
 import { ExecutionController, type TaskIntent } from "../core/execution-controller.js";
-import type { PiRuntimeAdapter, RuntimeEvent } from "../runtime/types.js";
+import type { ImageAttachment, PiRuntimeAdapter, RuntimeEvent } from "../runtime/types.js";
 import type { ExecutionStatus, SessionSnapshot, SessionSummary } from "./ipc-contract.js";
+import { ContextStore, activeBranch, listContextItems, roundEntryIds, type ContextEdit } from "./context-management.js";
+import { ExtensionStore } from "./extensions.js";
+import { discoverWorkspace } from "./workspace-discovery.js";
 
 let window: BrowserWindow | undefined;
 let manager: HarnessSessionManager;
 let execution: ExecutionController;
+let extensions: ExtensionStore;
+let contextStore: ContextStore;
 let quitting = false;
 const statuses = new Map<string, ExecutionStatus>();
+const contextUpdating = new Set<string>();
 const subscriptions = new Map<string, () => void>();
-const authorizedProjects = new Set<string>();
+const authorizedProjects = new Map<string, string>();
+let projectIndexPath: string;
+let projectWrites = Promise.resolve();
+
+async function saveProjects(): Promise<void> {
+  const content = JSON.stringify([...authorizedProjects].map(([path, name]) => ({ path, name })));
+  projectWrites = projectWrites.catch(() => {}).then(() => writeFile(projectIndexPath, content));
+  await projectWrites;
+}
 
 function requireSession(id: unknown): string {
   if (typeof id !== "string" || !manager.list().some((session) => session.id === id)) throw new Error("Invalid session ID");
@@ -35,6 +51,7 @@ async function requireProject(value: unknown): Promise<string> {
 
 async function resolvePiPath(): Promise<string> {
   if (process.env.PI_PATH) return process.env.PI_PATH;
+  if (process.platform === "win32") return "pi";
   const managed = join(homedir(), ".local", "bin", "pi");
   try {
     await access(managed);
@@ -78,11 +95,45 @@ async function openSnapshot(id: string): Promise<SessionSnapshot> {
 }
 
 function registerIpc(): void {
+  ipcMain.handle("auth:list-stored", async () => {
+    const authPath = join(process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent"), "auth.json");
+    let raw: string;
+    try { raw = await readFile(authPath, "utf8"); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return []; throw new Error("Unable to read provider credentials"); }
+    let data: unknown;
+    try { data = JSON.parse(raw); } catch { throw new Error("Unable to read provider credentials: invalid configuration"); }
+    if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("Unable to read provider credentials: invalid configuration");
+    return Object.entries(data).filter(([, value]) => value && typeof value === "object" && !Array.isArray(value)).map(([provider]) => provider).sort();
+  });
+  ipcMain.handle("auth:open-terminal", async () => {
+    if (process.platform !== "darwin") throw new Error("Opening a terminal is currently supported on macOS only. Run pi in your terminal instead.");
+    const piPath = await resolvePiPath();
+    const command = "exec '" + piPath.replace(/'/g, "'\\''") + "'";
+    await promisify(execFile)("osascript", ["-e", "on run argv", "-e", "tell application \"Terminal\"", "-e", "activate", "-e", "do script (item 1 of argv)", "-e", "end tell", "-e", "end run", command]);
+  });
+  ipcMain.handle("app:open-external", async (_event, value: unknown) => {
+    if (typeof value !== "string" || value.length > 4096) throw new Error("Invalid URL");
+    const url = new URL(value);
+    if (!["http:", "https:", "mailto:"].includes(url.protocol)) throw new Error("Unsupported URL");
+    await shell.openExternal(url.href);
+  });
   ipcMain.handle("project:choose", async () => {
     const result = await dialog.showOpenDialog(window!, { properties: ["openDirectory", "createDirectory"] });
     const selected = result.canceled ? undefined : result.filePaths[0];
-    if (selected) authorizedProjects.add(selected);
+    if (selected) { if (!authorizedProjects.has(selected)) authorizedProjects.set(selected, basename(selected) || selected); await saveProjects(); }
     return selected ?? null;
+  });
+  ipcMain.handle("project:list", () => [...authorizedProjects].map(([path, name]) => ({ path, name })));
+  ipcMain.handle("project:rename", async (_event, path: unknown, value: unknown) => {
+    if (typeof path !== "string" || !authorizedProjects.has(path)) throw new Error("Invalid project");
+    const name = requireText(value, "Project name", 120);
+    authorizedProjects.set(path, name);
+    await saveProjects();
+  });
+  ipcMain.handle("project:remove", async (_event, path: unknown) => {
+    if (typeof path !== "string" || !authorizedProjects.has(path)) throw new Error("Invalid project");
+    authorizedProjects.delete(path);
+    await saveProjects();
   });
   ipcMain.handle("sessions:list", () => summaries());
   ipcMain.handle("sessions:create", async (_event, projectDir: string, name?: string) => {
@@ -106,21 +157,30 @@ function registerIpc(): void {
     subscriptions.get(id)?.();
     subscriptions.delete(id);
     statuses.delete(id);
+    const piSessionId = manager.list().find((session) => session.id === id)!.piSessionId;
     await manager.deleteSession(id);
+    await contextStore.remove(piSessionId);
     publishSessions();
   });
-  ipcMain.handle("runtime:prompt", async (_event, id: string, message: string, intent: TaskIntent) => {
+  ipcMain.handle("runtime:prompt", async (_event, id: string, message: string, intent: TaskIntent, images?: ImageAttachment[]) => {
     id = requireSession(id);
-    message = requireText(message, "Prompt", 2_000_000);
+    if (contextUpdating.has(id)) throw new Error("Context update is in progress");
+    if (typeof message !== "string" || message.length > 2_000_000) throw new Error("Invalid prompt");
+    message = message.trim();
+    if (images !== undefined && (!Array.isArray(images) || images.length > 4 || images.some((image) => !image || image.type !== "image" || !["image/png", "image/jpeg", "image/gif", "image/webp"].includes(image.mimeType) || typeof image.data !== "string" || image.data.length > 13_981_016 || (!image.data.length || image.data.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(image.data))))) throw new Error("Invalid images");
+    if (!message && !images?.length) throw new Error("Prompt is empty");
     if (intent !== "analysis" && intent !== "write") throw new Error("Invalid task intent");
     const runtime = manager.runtime(id) ?? (await manager.open(id), manager.runtime(id));
     if (!runtime) throw new Error("Runtime unavailable");
     bindRuntime(id, runtime);
     const metadata = manager.list().find((session) => session.id === id);
     if (!metadata) throw new Error("Session metadata unavailable");
+    const savedContext = await contextStore.read(metadata.piSessionId);
+    if (Object.keys(savedContext).length && !(await runtime.getCommands()).some((command) => command.source === "extension" && command.name === "harness-context-filter-ready")) throw new Error("Context filter is unavailable; restart the application before sending");
+    if (contextUpdating.has(id)) throw new Error("Context update is in progress");
     try {
       const lease = await execution.acquire({ sessionId: id, projectDir: metadata.projectDir, intent });
-      const result = await runtime.prompt(message);
+      const result = await runtime.prompt(message, images);
       if (result.disposition === "handled") lease.release();
       return { runId: result.runId, taskId: lease.taskId };
     } catch (error) {
@@ -141,6 +201,98 @@ function registerIpc(): void {
     const runtime = manager.runtime(id) ?? (await manager.open(id), manager.runtime(id));
     if (!runtime) throw new Error("Runtime unavailable");
     return runtime.getAvailableModels();
+  });
+  ipcMain.handle("runtime:context-usage", async (_event, id: string) => {
+    id = requireSession(id);
+    const runtime = manager.runtime(id);
+    if (!runtime) throw new Error("Runtime unavailable");
+    return runtime.getContextUsage();
+  });
+  const getContext = async (sessionId: string) => {
+    const metadata = manager.list().find((session) => session.id === sessionId)!;
+    const runtime = manager.runtime(sessionId); if (!runtime) throw new Error("Session runtime unavailable");
+    const { entries, leafId } = await runtime.getEntries();
+    const edits = await contextStore.read(metadata.piSessionId);
+    return { metadata, edits, entries, leafId, items: listContextItems(entries, leafId, edits) };
+  };
+  ipcMain.handle("context:list", async (_event, id: unknown) => (await getContext(requireSession(id))).items);
+  ipcMain.handle("context:update", async (_event, sessionId: unknown, entryId: unknown, edit: unknown) => {
+    const id = requireSession(sessionId);
+    if (execution.has(id) || contextUpdating.has(id)) throw new Error("Wait until the session is idle");
+    contextUpdating.add(id);
+    try {
+    if (typeof entryId !== "string" || !entryId || entryId.length > 200) throw new Error("Invalid message ID");
+    const context = await getContext(id);
+    const runtime = manager.runtime(id)!;
+    if (!(await runtime.getCommands()).some((command) => command.source === "extension" && command.name === "harness-context-filter-ready")) throw new Error("Context filter is unavailable; restart the application");
+    const item = context.items.find((value) => value.id === entryId);
+    if (!item?.editable) throw new Error("This message cannot be edited in the current context");
+    if (edit === null) {
+      if (context.edits[entryId]?.roundExcluded) context.edits[entryId] = { excluded: false, roundExcluded: true };
+      else delete context.edits[entryId];
+    }
+    else {
+      if (!edit || typeof edit !== "object" || typeof (edit as ContextEdit).excluded !== "boolean") throw new Error("Invalid context edit");
+      const value = edit as ContextEdit;
+      if (value.text !== undefined && (typeof value.text !== "string" || !value.text.trim() || value.text.length > 100_000)) throw new Error("Invalid message text");
+      context.edits[entryId] = { excluded: value.excluded, ...(context.edits[entryId]?.roundExcluded ? { roundExcluded: true } : {}), ...(value.text !== undefined && value.text !== item.original ? { text: value.text } : {}) };
+    }
+    if (execution.has(id)) throw new Error("Wait until the session is idle");
+    await contextStore.write(context.metadata.piSessionId, context.edits);
+    return (await getContext(id)).items;
+    } finally { contextUpdating.delete(id); }
+  });
+  ipcMain.handle("context:round", async (_event, sessionId: unknown, entryId: unknown, excluded: unknown) => {
+    const id = requireSession(sessionId);
+    if (execution.has(id) || contextUpdating.has(id)) throw new Error("Wait until the session is idle");
+    if (typeof entryId !== "string" || typeof excluded !== "boolean") throw new Error("Invalid round");
+    contextUpdating.add(id);
+    try {
+      const context = await getContext(id);
+      if (!context.items.find((item) => item.id === entryId)?.roundAvailable) throw new Error("This round cannot be safely adjusted");
+      if (!(await manager.runtime(id)!.getCommands()).some((command) => command.source === "extension" && command.name === "harness-context-filter-ready")) throw new Error("Context filter is unavailable; restart the application");
+      for (const targetId of roundEntryIds(activeBranch(context.entries, context.leafId), entryId)) {
+        const current = context.edits[targetId];
+        if (excluded) context.edits[targetId] = { ...(current ?? { excluded: false }), roundExcluded: true };
+        else if (current?.roundExcluded) {
+          const { roundExcluded: _discard, ...rest } = current;
+          if (!rest.excluded && rest.text === undefined) delete context.edits[targetId]; else context.edits[targetId] = rest;
+        }
+      }
+      if (execution.has(id)) throw new Error("Wait until the session is idle");
+      await contextStore.write(context.metadata.piSessionId, context.edits);
+      return (await getContext(id)).items;
+    } finally { contextUpdating.delete(id); }
+  });
+  ipcMain.handle("extensions:list", () => extensions.list());
+  ipcMain.handle("extensions:add", async (_event, kind: unknown) => {
+    if (kind !== "file" && kind !== "directory") throw new Error("Invalid extension source");
+    const result = await dialog.showOpenDialog(window!, { properties: [kind === "file" ? "openFile" : "openDirectory"], ...(kind === "file" ? { filters: [{ name: "Pi extensions", extensions: ["ts", "js", "mjs", "mts"] }] } : {}) });
+    if (!result.canceled && result.filePaths[0]) await extensions.add(result.filePaths[0]);
+    return extensions.list();
+  });
+  ipcMain.handle("extensions:add-network", async (_event, source: unknown) => {
+    if (typeof source !== "string") throw new Error("Invalid network source");
+    await extensions.addNetwork(source, await resolvePiPath()); return extensions.list();
+  });
+  ipcMain.handle("extensions:enable", async (_event, path: unknown, enabled: unknown) => {
+    if (typeof path !== "string" || typeof enabled !== "boolean") throw new Error("Invalid extension");
+    await extensions.setEnabled(path, enabled); return extensions.list();
+  });
+  ipcMain.handle("extensions:remove", async (_event, path: unknown) => {
+    if (typeof path !== "string") throw new Error("Invalid extension");
+    await extensions.remove(path); return extensions.list();
+  });
+  ipcMain.handle("workspace:discover", async (_event, id: string) => {
+    id = requireSession(id);
+    const metadata = manager.list().find((session) => session.id === id)!;
+    const result = await discoverWorkspace(metadata.projectDir, process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent"));
+    try {
+      const runtime = manager.runtime(id);
+      if (!runtime) throw new Error("Session runtime is not open");
+      result.skills = (await runtime.getCommands()).filter((command) => command.source === "skill").map(({ name, description }) => ({ name, ...(description ? { description } : {}) }));
+    } catch (error) { result.skillError = error instanceof Error ? error.message : String(error); }
+    return result;
   });
   ipcMain.handle("runtime:set-model", async (_event, id: string, provider: string, modelId: string) => {
     id = requireSession(id);
@@ -194,9 +346,13 @@ async function createWindow(): Promise<void> {
 }
 
 app.whenReady().then(async () => {
+  contextStore = new ContextStore(join(app.getPath("userData"), "harness-state", "context-edits"));
+  extensions = new ExtensionStore(join(app.getPath("userData"), "harness-state", "extensions.json"));
+  await extensions.load();
   manager = new HarnessSessionManager({
     storageDir: join(app.getPath("userData"), "harness-state"),
     piPath: await resolvePiPath(),
+    extensionPaths: () => extensions.enabledPaths(),
   });
   execution = new ExecutionController({
     maxConcurrent: 2,
@@ -206,7 +362,23 @@ app.whenReady().then(async () => {
     },
   });
   await manager.load();
-  for (const session of manager.list()) authorizedProjects.add(session.projectDir);
+  const stateDir = join(app.getPath("userData"), "harness-state");
+  await mkdir(stateDir, { recursive: true });
+  projectIndexPath = join(stateDir, "projects.json");
+  try {
+    const stored: unknown = JSON.parse(await readFile(projectIndexPath, "utf8"));
+    if (!Array.isArray(stored)) throw new Error("Invalid project index");
+    for (const item of stored) {
+      const path = typeof item === "string" ? item : item?.path;
+      const name = typeof item === "string" ? basename(item) || item : item?.name;
+      if (typeof path !== "string" || !isAbsolute(path) || typeof name !== "string" || !name.trim() || name.length > 120) throw new Error("Invalid project index");
+      authorizedProjects.set(path, name);
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    for (const session of manager.list()) authorizedProjects.set(session.projectDir, basename(session.projectDir) || session.projectDir);
+    await saveProjects();
+  }
   registerIpc();
   await createWindow();
   if (process.env.HARNESS_SMOKE_TEST === "1") {

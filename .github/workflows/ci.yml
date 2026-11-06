@@ -20,7 +20,7 @@ jobs:
       - run: npm ci
       - run: npm install --global @earendil-works/pi-coding-agent@1.5.0
       - run: npm run release:verify
-      - if: runner.os == 'macOS'
+      - if: runner.os == 'macOS' || runner.os == 'Windows'
         run: npm run smoke:desktop
 
   package:

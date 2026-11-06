@@ -1,5 +1,6 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { type ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
+import spawn from "cross-spawn";
 import type { ExtensionUiResponse, RpcCommand, RpcRecord, RpcResponse } from "./types.js";
 
 export interface PiRpcTransportOptions {
@@ -37,7 +38,7 @@ export class PiRpcTransport {
       env: { ...process.env, ...this.#options.env },
       stdio: ["pipe", "pipe", "pipe"],
       detached: process.platform !== "win32",
-    });
+    }) as ChildProcessWithoutNullStreams;
     this.#child = child;
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");

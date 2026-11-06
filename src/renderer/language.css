@@ -1,0 +1,68 @@
+.language-control { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 10px 0; color: #817a73; font-size: 12px; }
+.language-control select { max-width: 120px; padding: 5px 7px; border: 1px solid #e5e0da; border-radius: 7px; background: #fbfaf8; color: #625a54; font-size: 12px; }
+.workspace-tab { padding: 0 0 10px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: inherit; }
+.workspace-tab.active { border-bottom-color: #bb7659; color: #302a26; }
+.workspace-row { display: flex; flex-direction: column; gap: 5px; padding: 14px 0; border-top: 1px solid #eee9e4; font-size: 13px; }
+.workspace-row small { overflow-wrap: anywhere; color: #817a73; }
+.workspace-warning { color: #a34234 !important; overflow-wrap: anywhere; }
+.message.user { width: fit-content; max-width: min(78%, 640px); margin-left: auto; }
+.message.assistant { margin-right: auto; }
+.message pre { font-family: inherit; font-size: 14px; line-height: 1.7; overflow-wrap: anywhere; white-space: pre-wrap; }
+@media (max-width: 800px) { .message.user { max-width: 88%; } }
+.message .markdown pre { font: 12px/1.55 ui-monospace, monospace; white-space: pre; overflow-wrap: normal; }
+.work-log { margin-top: 12px; font-size: 12px; color: #77716b; }
+.work-log > summary { display: inline-flex; align-items: center; gap: 6px; padding: 6px 9px; border: 1px solid #e8e3dd; border-radius: 8px; cursor: pointer; list-style: none; }
+.work-log > summary::-webkit-details-marker { display: none; }
+.work-log > summary::before { content: "▸"; font-size: 11px; }
+.work-log[open] > summary::before { content: "▾"; }
+.work-log > summary:hover { background: #f6f2ee; }
+.work-log > summary span { color: #aaa29b; }
+.work-log-entries { margin-top: 8px; }
+.work-log-entries .tool-activity { margin-bottom: 6px; }
+.composer-box .image-attach { min-width: 36px; width: 36px; background: transparent; border: 1px solid #e8e1da; color: #77716b; font-size: 20px; }
+.image-previews, .message-images { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.image-previews > div { position: relative; }
+.image-previews img, .message-images img { display: block; max-width: 180px; max-height: 140px; border-radius: 8px; object-fit: contain; }
+.image-previews button { position: absolute; right: -5px; top: -5px; width: 22px; height: 22px; border: 0; border-radius: 50%; background: #625a54; color: white; }
+
+.extensions-heading,.extension-row { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+.extensions-heading>div,.extension-actions { display:flex; gap:7px; flex-shrink:0; }
+.extensions-heading button,.extension-actions button { padding:7px 10px; border:1px solid #e0dad4; border-radius:8px; background:#faf8f5; font-size:12px; }
+.extensions-heading button:disabled,.extension-actions button:disabled { opacity:.5; }
+.extension-row>div:first-child { display:flex; min-width:0; flex-direction:column; gap:5px; }
+
+.network-extension { display:flex; flex-direction:column; gap:8px; margin:16px 0; padding:14px; border:1px solid #e8e3dd; border-radius:9px; font-size:12px; }
+.network-extension>div { display:flex; gap:8px; }
+.network-extension input { min-width:0; flex:1; padding:9px; border:1px solid #dedad5; border-radius:7px; background:white; }
+.network-extension button { padding:8px 14px; border:0; border-radius:7px; background:#bb7659; color:white; }
+.network-extension button:disabled { opacity:.5; }
+.network-extension small { color:#817a73; line-height:1.5; }
+
+.pending-files { display:flex; flex-direction:column; gap:5px; margin:0 0 8px; }
+.pending-files>div { display:flex; align-items:flex-start; gap:8px; padding:7px 10px; border:1px solid #e8e3dd; border-radius:8px; background:white; font-size:12px; }
+.pending-files details { min-width:0; flex:1; }
+.pending-files summary,.file-attachment summary { cursor:pointer; overflow-wrap:anywhere; }
+.pending-files pre,.file-attachment pre { max-height:180px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; font:12px/1.5 ui-monospace,monospace; }
+.pending-files button { border:0; background:transparent; color:#77716b; font-size:16px; }
+.file-attachment { margin:6px 0; padding:7px 9px; border:1px solid #e8e3dd; border-radius:8px; font-size:12px; }
+
+.context-manage-button { margin-top:12px; padding:7px 10px; border:1px solid #e0dad4; border-radius:7px; background:#faf8f5; }
+.context-manager { width:min(960px, 88vw, calc(100vw - 24px)); height:min(800px, 85vh, calc(100vh - 24px)); height:min(800px, 85dvh, calc(100dvh - 24px)); display:flex; flex-direction:column; overflow:hidden; padding:20px; }
+.context-items { min-width:0; min-height:0; flex:1; overflow-y:auto; overscroll-behavior:contain; }
+.context-manager > .modal-actions { flex:none; margin:12px -20px -20px; padding:12px 20px; background:#fcfbf9; border-top:1px solid #eee9e4; }
+.context-item { padding:12px 0; border-top:1px solid #eee9e4; font-size:12px; }
+.context-item-head,.context-item-actions { display:flex; gap:8px; align-items:center; justify-content:space-between; }
+.context-item-head span { color:#817a73; }
+.context-item pre { max-height:140px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; font:12px/1.5 inherit; }
+.context-item-actions { justify-content:flex-end; flex-wrap:wrap; }
+.context-item-actions button { padding:6px 9px; border:1px solid #e0dad4; border-radius:7px; background:#faf8f5; }
+.context-item-actions button:disabled { opacity:.4; }
+
+.context-load-more,.context-show-more { padding:6px 8px; border:0; border-radius:6px; background:#f6f2ee; color:#806b60; font-size:12px; }
+.context-load-more { display:block; margin:8px auto; }
+.context-show-more { margin-bottom:8px; }
+
+@media (max-width:480px), (max-height:450px) { .context-manager { padding:14px; } .context-manager > .modal-actions { margin:10px -14px -14px; padding:9px 14px; } .context-manager > h2 { margin:0 0 8px; font-size:19px; } .context-manager > p { margin:6px 0 10px; font-size:12px; } .context-item-head { flex-wrap:wrap; } }
+
+/* Dialogs must cover the composer and its positioned controls. */
+.modal-backdrop { z-index:100; }

@@ -1,6 +1,9 @@
+import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type {
+  ContextUsage,
   ExtensionUiResponse,
+  ImageAttachment,
   PiRuntimeAdapter,
   PiSessionState,
   PromptDisposition,
@@ -18,6 +21,7 @@ export interface PiRpcAdapterOptions {
   piPath?: string;
   piExecutableArgs?: string[];
   extraArgs?: string[];
+  contextDir?: string;
 }
 
 export class PiRpcAdapter implements PiRuntimeAdapter {
@@ -35,10 +39,12 @@ export class PiRpcAdapter implements PiRuntimeAdapter {
       ...(options.piPath ? { piPath: options.piPath } : {}),
       ...(options.piExecutableArgs ? { executableArgs: options.piExecutableArgs } : {}),
       cwd: options.projectDir,
+      ...(options.contextDir ? { env: { HARNESS_CONTEXT_DIR: options.contextDir } } : {}),
       args: [
         "--session-id", options.piSessionId,
         "--session-dir", options.sessionDir,
         "--offline",
+        ...(options.contextDir ? ["--extension", join(import.meta.dirname, "context-filter.js")] : []),
         ...(options.extraArgs ?? []),
       ],
     });
@@ -62,12 +68,12 @@ export class PiRpcAdapter implements PiRuntimeAdapter {
     }
   }
 
-  async prompt(message: string): Promise<{ disposition: PromptDisposition; runId: string }> {
+  async prompt(message: string, images?: ImageAttachment[]): Promise<{ disposition: PromptDisposition; runId: string }> {
     if (this.#activeRunId) throw new Error("This session already has an active run");
     const runId = randomUUID();
     this.#activeRunId = runId;
     try {
-      const response = await this.#checked(this.#transport.request({ type: "prompt", message }));
+      const response = await this.#checked(this.#transport.request({ type: "prompt", message, ...(images?.length ? { images } : {}) }));
       const data = response.data as { disposition: PromptDisposition };
       if (data.disposition === "handled") this.#activeRunId = undefined;
       return { disposition: data.disposition, runId };
@@ -89,6 +95,20 @@ export class PiRpcAdapter implements PiRuntimeAdapter {
   async getMessages(): Promise<unknown[]> {
     const response = await this.#checked(this.#transport.request({ type: "get_messages" }));
     return (response.data as { messages: unknown[] }).messages;
+  }
+
+  async getEntries(): Promise<{ entries: Record<string, unknown>[]; leafId: string | null }> {
+    const response = await this.#checked(this.#transport.request({ type: "get_entries" }));
+    return response.data as { entries: Record<string, unknown>[]; leafId: string | null };
+  }
+
+  async getContextUsage(): Promise<ContextUsage | null> {
+    const response = await this.#checked(this.#transport.request({ type: "get_session_stats" }));
+    const usage = (response.data as { contextUsage?: ContextUsage } | undefined)?.contextUsage;
+    if (!usage || !Number.isFinite(usage.contextWindow) || usage.contextWindow <= 0 ||
+      (usage.tokens !== null && (!Number.isFinite(usage.tokens) || usage.tokens < 0)) ||
+      (usage.percent !== null && (!Number.isFinite(usage.percent) || usage.percent < 0))) return null;
+    return usage;
   }
 
   async setSessionName(name: string): Promise<void> {
