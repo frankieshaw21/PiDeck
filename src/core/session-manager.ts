@@ -35,6 +35,8 @@ export class HarnessSessionManager {
   readonly #extensionPaths: () => string[];
   readonly #adapterFactory: (options: PiRpcAdapterOptions) => PiRuntimeAdapter;
   readonly #sessions = new Map<string, HarnessSessionMetadata>();
+  readonly #opening = new Map<string, Promise<{ metadata: HarnessSessionMetadata; state: PiSessionState }>>();
+  #writes = Promise.resolve();
   readonly #runtimes = new Map<string, PiRuntimeAdapter>();
 
   constructor(options: SessionManagerOptions) {
@@ -92,24 +94,37 @@ export class HarnessSessionManager {
     return { metadata: { ...stored }, state };
   }
 
-  async open(id: string): Promise<{ metadata: HarnessSessionMetadata; state: PiSessionState }> {
+  open(id: string): Promise<{ metadata: HarnessSessionMetadata; state: PiSessionState }> {
+    const pending = this.#opening.get(id);
+    if (pending) return pending;
+    const opening = this.#open(id).finally(() => this.#opening.delete(id));
+    this.#opening.set(id, opening);
+    return opening;
+  }
+
+  async #open(id: string): Promise<{ metadata: HarnessSessionMetadata; state: PiSessionState }> {
     const metadata = this.#sessions.get(id);
     if (!metadata) throw new Error(`Unknown Harness session: ${id}`);
     const existing = this.#runtimes.get(id);
     if (existing) return { metadata: { ...metadata }, state: await existing.getState() };
     const runtime = this.#makeRuntime(metadata);
-    let state = await runtime.start();
-    if (state.sessionName !== metadata.name) {
-      await runtime.setSessionName(metadata.name);
-      state = await runtime.getState();
+    try {
+      let state = await runtime.start();
+      if (state.sessionName !== metadata.name) {
+        await runtime.setSessionName(metadata.name);
+        state = await runtime.getState();
+      }
+      if (state.sessionFile && state.sessionFile !== metadata.piSessionFile) {
+        const updated = { ...metadata, piSessionFile: state.sessionFile, updatedAt: new Date().toISOString() };
+        this.#sessions.set(id, updated);
+        await this.#save();
+      }
+      this.#runtimes.set(id, runtime);
+      return { metadata: { ...(this.#sessions.get(id) ?? metadata) }, state };
+    } catch (error) {
+      await runtime.dispose().catch(() => {});
+      throw error;
     }
-    if (state.sessionFile && state.sessionFile !== metadata.piSessionFile) {
-      const updated = { ...metadata, piSessionFile: state.sessionFile, updatedAt: new Date().toISOString() };
-      this.#sessions.set(id, updated);
-      await this.#save();
-    }
-    this.#runtimes.set(id, runtime);
-    return { metadata: { ...(this.#sessions.get(id) ?? metadata) }, state };
   }
 
   async renameSession(id: string, name: string): Promise<void> {
@@ -121,6 +136,7 @@ export class HarnessSessionManager {
   }
 
   async close(id: string): Promise<void> {
+    await this.#opening.get(id)?.catch(() => {});
     const runtime = this.#runtimes.get(id);
     this.#runtimes.delete(id);
     await runtime?.dispose();
@@ -142,6 +158,7 @@ export class HarnessSessionManager {
   }
 
   async dispose(): Promise<void> {
+    await Promise.allSettled(this.#opening.values());
     const runtimes = [...this.#runtimes.values()];
     this.#runtimes.clear();
     await Promise.allSettled(runtimes.map((runtime) => runtime.dispose()));
@@ -162,10 +179,20 @@ export class HarnessSessionManager {
   }
 
   async #save(): Promise<void> {
-    await mkdir(dirname(this.#indexPath), { recursive: true });
-    const temp = `${this.#indexPath}.${process.pid}.tmp`;
     const index: HarnessIndex = { version: 1, sessions: this.list() };
-    await writeFile(temp, `${JSON.stringify(index, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
-    await rename(temp, this.#indexPath);
+    const content = `${JSON.stringify(index, null, 2)}\n`;
+    this.#writes = this.#writes.catch(() => {}).then(async () => {
+      await mkdir(dirname(this.#indexPath), { recursive: true });
+      // Each write owns its temporary file, even across manager instances.
+      const temp = `${this.#indexPath}.${process.pid}.${randomUUID()}.tmp`;
+      try {
+        await writeFile(temp, content, { encoding: "utf8", mode: 0o600, flag: "wx" });
+        await rename(temp, this.#indexPath);
+      } finally {
+        // Best-effort cleanup must not hide the original persistence error.
+        await unlink(temp).catch(() => {});
+      }
+    });
+    await this.#writes;
   }
 }

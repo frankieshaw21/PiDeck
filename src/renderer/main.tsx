@@ -56,6 +56,11 @@ function historyItems(messages: unknown[]): ViewItem[] {
   return items;
 }
 
+function WorkLog({ segment, language }: { segment: ViewItem[]; language: Language }) {
+  const [open, setOpen] = useState(false);
+  return <details className="work-log" onToggle={(event) => setOpen(event.currentTarget.open)}><summary>Work log <span>{segment.length}</span></summary>{open && (<div className="work-log-entries">{segment.map((item) => <details key={item.key} className="tool-activity"><summary>{item.kind === "thinking" ? (item.streaming ? (language === "zh" ? "正在思考…" : "Thinking…") : (language === "zh" ? "思考过程" : "Thinking")) : (language === "zh" ? item.text.replace(/^Running (.*)…$/, "正在运行 $1…").replace(/^(.*) finished$/, "$1 已完成").replace(/^(.*) failed$/, "$1 失败") : item.text)}</summary><pre>{item.kind === "thinking" ? item.text || (language === "zh" ? "等待内容…" : "Waiting for content…") : item.detail || (language === "zh" ? "暂无详情" : "No details available")}</pre></details>)}</div>)}</details>;
+}
+
 function App() {
   const [devices, setDevices] = useState<Record<string, DeviceState>>({});
   useEffect(() => {
@@ -80,6 +85,9 @@ function App() {
   const [project, setProject] = useState<string | null>(null);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const openRequestRef = useRef(0);
+  const snapshotsRef = useRef(new Map<string, SessionSnapshot>());
+  const [visibleGroups, setVisibleGroups] = useState(30);
   const [selected, setSelected] = useState<SessionSnapshot | null>(null);
   const [items, setItems] = useState<Record<string, ViewItem[]>>({});
   const [composers, setComposers] = useState<Record<string, { draft: string; images: ImageAttachment[]; files: FileContext[] }>>({});
@@ -175,8 +183,19 @@ function App() {
     void window.piHarness.listSessions().then(setSessions).catch(showError);
     void window.piHarness.listProjects().then(setProjects).catch(showError);
     const offSessions = window.piHarness.onSessionsChanged(setSessions);
-    const offEvents = window.piHarness.onRuntimeEvent(handleEvent);
-    return () => { offSessions(); offEvents(); };
+    // Coalesce streaming bursts so React commits at most once per 32 ms.
+    let pending: RuntimeEvent[] = [];
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const offEvents = window.piHarness.onRuntimeEvent((event) => {
+      pending.push(event);
+      timer ??= setTimeout(() => {
+        timer = undefined;
+        const events = pending;
+        pending = [];
+        events.forEach(handleEvent);
+      }, 32);
+    });
+    return () => { offSessions(); offEvents(); clearTimeout(timer); };
   }, []);
 
   useEffect(() => { followMessagesRef.current = true; }, [selected?.metadata.id]);
@@ -207,7 +226,9 @@ function App() {
   }
 
   const selectedSummary = useMemo(() => sessions.find((session) => session.id === selected?.metadata.id), [sessions, selected]);
-  const currentItems = selected ? items[selected.metadata.id] ?? [] : [];
+  const currentItems = selected ? items[selected.metadata.id] : undefined;
+  const messageGroups = useMemo(() => groupMessages(currentItems ?? []), [currentItems]);
+  useEffect(() => { setVisibleGroups(30); }, [selected?.metadata.id]);
 
   useEffect(() => {
     if (!showContext || !selected) return;
@@ -246,6 +267,7 @@ function App() {
         }));
       }
     }
+    if (!["message_update", "message_end", "tool_execution_start", "tool_execution_update", "tool_execution_end", "auto_retry_start"].includes(event.record.type)) return;
     setItems((current) => {
       const list = [...(current[event.harnessSessionId] ?? [])];
       if (event.record.type === "message_update") {
@@ -290,6 +312,7 @@ function App() {
 
   function switchProject(path: string | null) {
     if (path === project) return;
+    openRequestRef.current++;
     setProject(path);
     setSelected(null);
     setWorkspace(false);
@@ -330,36 +353,45 @@ function App() {
   }
 
   async function createSession() {
+    const request = ++openRequestRef.current;
     try {
       const path = project ?? await window.piHarness.chooseProject();
       if (!path) return;
       setProjects(await window.piHarness.listProjects());
       setProject(path);
       const snapshot = await window.piHarness.createSession(path);
-      setSelected(snapshot);
+      if (request !== openRequestRef.current) return;
+      snapshotsRef.current.set(snapshot.metadata.id, { ...snapshot, messages: [] });
+      setModels([]);
+      setSelected({ ...snapshot, messages: [] });
       setModelUsages((current) => ({ ...current, [snapshot.metadata.id]: lastModelUsage(snapshot.messages) }));
       setWorkspace(false);
       setItems((current) => ({ ...current, [snapshot.metadata.id]: [] }));
-      void window.piHarness.listModels(snapshot.metadata.id).then(setModels).catch(showError);
+      void window.piHarness.listModels(snapshot.metadata.id).then((value) => { if (request === openRequestRef.current) setModels(value); }).catch(showError);
     } catch (value) { showError(value); }
   }
 
   async function openSession(id: string) {
+    const request = ++openRequestRef.current;
+    setModels([]);
     try {
-      const snapshot = await window.piHarness.openSession(id);
-      setSelected(snapshot);
-      setModelUsages((current) => ({ ...current, [id]: lastModelUsage(snapshot.messages) }));
+      const snapshot = snapshotsRef.current.get(id) ?? await window.piHarness.openSession(id);
+      if (request !== openRequestRef.current) return;
+      snapshotsRef.current.set(id, { ...snapshot, messages: [] });
+      setSelected({ ...snapshot, messages: [] });
+      setModelUsages((current) => ({ ...current, [id]: current[id] ?? lastModelUsage(snapshot.messages) }));
       setWorkspace(false);
       setProject(snapshot.metadata.projectDir);
       setItems((current) => ({ ...current, [id]: current[id] ?? historyItems(snapshot.messages) }));
-      void window.piHarness.listModels(id).then(setModels).catch(showError);
-    } catch (value) { showError(value); }
+      void window.piHarness.listModels(id).then((value) => { if (request === openRequestRef.current) setModels(value); }).catch((value) => { if (request === openRequestRef.current) showError(value); });
+    } catch (value) { if (request === openRequestRef.current) showError(value); }
   }
 
   async function deleteSession(id: string, name: string) {
     if (!window.confirm(language === "zh" ? `删除会话“${name}”？这会删除其 Pi 历史记录，并非仅停止任务。` : `Delete session “${name}”? This is separate from stopping a task and removes its Pi history.`)) return;
     try {
       await window.piHarness.deleteSession(id);
+      snapshotsRef.current.delete(id);
       setItems((current) => { const next = { ...current }; delete next[id]; return next; });
       if (selected?.metadata.id === id) setSelected(null);
     } catch (value) { showError(value); }
@@ -373,6 +405,7 @@ function App() {
     setRenaming(true); setRenameError(null);
     try {
       await window.piHarness.renameSession(renameTarget.id, name);
+      snapshotsRef.current.delete(renameTarget.id);
       setSelected((current) => current?.metadata.id === renameTarget.id ? { ...current, metadata: { ...current.metadata, name } } : current);
       setRenameTarget(null);
     } catch (value) { setRenameError(value instanceof Error ? value.message : String(value)); }
@@ -515,7 +548,8 @@ function App() {
             if (!option) return;
             void window.piHarness.setModel(selected.metadata.id, option.provider, option.id).then(async () => {
               const snapshot = await window.piHarness.openSession(selected.metadata.id);
-              setSelected(snapshot);
+              snapshotsRef.current.set(snapshot.metadata.id, { ...snapshot, messages: [] });
+              setSelected((current) => current?.metadata.id === snapshot.metadata.id ? snapshot : current);
             }).catch(showError);
           }}><option value={currentModel}>{currentModel || t.noModel}</option>{models.filter((model) => `${model.provider}/${model.id}` !== currentModel).map((model) => <option key={`${model.provider}/${model.id}`} value={`${model.provider}/${model.id}`}>{model.name ?? `${model.provider}/${model.id}`}</option>)}</select></div>
           <div className="status-stack"><span className={`status ${selectedSummary?.status.toLowerCase()}`}>{statusText(selectedSummary?.status ?? "Idle")}</span>
@@ -524,9 +558,10 @@ function App() {
         </header>
         <DevicePanel key={selected.metadata.id} id={selected.metadata.id} state={devices[selected.metadata.id]} zh={language === "zh"} agentBusy={Boolean(running)} />
         <div className="messages" ref={messagesRef} onScroll={(event) => { const element = event.currentTarget; followMessagesRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 48; }}>
-          {currentItems.length === 0 && <div className="empty"><span>π</span><h2>{t.start}</h2><p>{t.empty}</p></div>}
-          {groupMessages(currentItems).map((group) => group.kind === "single" ? group.items.map((item) => <article key={item.key} className={`message ${item.kind}`}>{item.kind === "notice" && <div className="label">{t.notice}</div>}{item.images?.length ? <div className="message-images">{item.images.map((image, index) => <img key={index} src={`data:${image.mimeType};base64,${image.data}`} alt={language === "zh" ? "附加图片" : "Attached image"} />)}</div> : null}{item.files?.map((file, index) => <details className="file-attachment" key={`${file.name}-${index}`}><summary>📄 {file.name}</summary><pre>{file.content}</pre></details>)}<MarkdownMessage text={item.kind === "notice" && item.text === "Pi is retrying the request…" ? t.retry : item.text} />{item.delivery && <div className="delivery-status" role="status">{item.delivery === "pending" ? (selectedSummary?.status === "Queued" ? (language === "zh" ? "排队中，尚未发送" : "Queued, not sent yet") : (language === "zh" ? "正在发送…" : "Sending…")) : <>{item.delivery === "cancelled" ? (language === "zh" ? "已取消，未发送" : "Cancelled, not sent") : (language === "zh" ? "发送失败" : "Send failed")}{item.deliveryError && <span> · {item.deliveryError}</span>} <button onClick={() => { if ((draft || images.length || files.length) && !window.confirm(language === "zh" ? "恢复此消息会替换当前草稿，继续吗？" : "Restore this message and replace the current draft?")) return; updateComposer(selected.metadata.id, () => ({ draft: item.text, images: item.images ?? [], files: item.files ?? [] })); setItems((current) => ({ ...current, [selected.metadata.id]: (current[selected.metadata.id] ?? []).filter((entry) => entry.key !== item.key) })); }}>{language === "zh" ? "恢复到输入框" : "Restore to composer"}</button></>}</div>}</article>) : <article key={group.key} className="message assistant">
-            {groupTimeline(group.items).map((segment) => segment[0]?.kind === "assistant" ? <MarkdownMessage key={segment[0].key} text={segment[0].text} /> : <details key={segment[0]?.key} className="work-log"><summary>Work log <span>{segment.length}</span></summary><div className="work-log-entries">{segment.map((item) => <details key={item.key} className="tool-activity"><summary>{item.kind === "thinking" ? (item.streaming ? (language === "zh" ? "正在思考…" : "Thinking…") : (language === "zh" ? "思考过程" : "Thinking")) : (language === "zh" ? item.text.replace(/^Running (.*)…$/, "正在运行 $1…").replace(/^(.*) finished$/, "$1 已完成").replace(/^(.*) failed$/, "$1 失败") : item.text)}</summary><pre>{item.kind === "thinking" ? item.text || (language === "zh" ? "等待内容…" : "Waiting for content…") : item.detail || (language === "zh" ? "暂无详情" : "No details available")}</pre></details>)}</div></details>)}
+          {!currentItems?.length && <div className="empty"><span>π</span><h2>{t.start}</h2><p>{t.empty}</p></div>}
+          {messageGroups.length > visibleGroups && <button onClick={() => { followMessagesRef.current = false; setVisibleGroups((count) => count + 30); }}>{language === "zh" ? "加载更早消息" : "Load earlier messages"}</button>}
+          {messageGroups.slice(-visibleGroups).map((group) => group.kind === "single" ? group.items.map((item) => <article key={item.key} className={`message ${item.kind}`}>{item.kind === "notice" && <div className="label">{t.notice}</div>}{item.images?.length ? <div className="message-images">{item.images.map((image, index) => <img key={index} src={`data:${image.mimeType};base64,${image.data}`} alt={language === "zh" ? "附加图片" : "Attached image"} />)}</div> : null}{item.files?.map((file, index) => <details className="file-attachment" key={`${file.name}-${index}`}><summary>📄 {file.name}</summary><pre>{file.content}</pre></details>)}<MarkdownMessage text={item.kind === "notice" && item.text === "Pi is retrying the request…" ? t.retry : item.text} />{item.delivery && <div className="delivery-status" role="status">{item.delivery === "pending" ? (selectedSummary?.status === "Queued" ? (language === "zh" ? "排队中，尚未发送" : "Queued, not sent yet") : (language === "zh" ? "正在发送…" : "Sending…")) : <>{item.delivery === "cancelled" ? (language === "zh" ? "已取消，未发送" : "Cancelled, not sent") : (language === "zh" ? "发送失败" : "Send failed")}{item.deliveryError && <span> · {item.deliveryError}</span>} <button onClick={() => { if ((draft || images.length || files.length) && !window.confirm(language === "zh" ? "恢复此消息会替换当前草稿，继续吗？" : "Restore this message and replace the current draft?")) return; updateComposer(selected.metadata.id, () => ({ draft: item.text, images: item.images ?? [], files: item.files ?? [] })); setItems((current) => ({ ...current, [selected.metadata.id]: (current[selected.metadata.id] ?? []).filter((entry) => entry.key !== item.key) })); }}>{language === "zh" ? "恢复到输入框" : "Restore to composer"}</button></>}</div>}</article>) : <article key={group.key} className="message assistant">
+            {groupTimeline(group.items).map((segment) => segment[0]?.kind === "assistant" ? <MarkdownMessage key={segment[0].key} text={segment[0].text} /> : <WorkLog key={segment[0]?.key} segment={segment} language={language} />)}
 
           </article>)}
           <div ref={endRef} />

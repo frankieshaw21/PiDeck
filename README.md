@@ -27,6 +27,18 @@ supplies desktop interaction and explicit multi-session execution control.
 - Session-scoped SSH devices with a shared persistent CLI or POSIX shell, live command
   input/output, manual commands, and the Agent's `device_exec` tool
 
+## Responsiveness
+
+Conversation history initially renders the latest 30 message groups. Use **Load earlier
+messages / 加载更早消息** to reveal more. Collapsed work logs mount their contents
+when expanded. Loaded conversations reuse their in-memory transcript when switching;
+streaming updates are batched every 32 ms and unchanged Markdown is reused.
+
+`npm start` rebuilds the application before opening it. After `npm run build`, use
+`npm run start:built` to launch the existing build directly; rebuild after source changes.
+`npm run smoke:performance` checks a synthetic 1,200-message conversation in an
+isolated desktop profile, including history paging, lazy work logs, and repeat opens.
+
 ## SSH devices
 
 Open a conversation and expand **SSH · Connect device / 连接设备** above the

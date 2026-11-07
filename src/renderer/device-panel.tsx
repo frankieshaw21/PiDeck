@@ -3,7 +3,7 @@ import type { DeviceState } from "../desktop/devices.js";
 import type { DeviceProfile } from "../desktop/device-profiles.js";
 import { deviceOutput } from "./device-output.js";
 
-export function DevicePanel({ id, state, zh, agentBusy }: { id: string; state?: DeviceState | undefined; zh: boolean; agentBusy: boolean }) {
+export const DevicePanel = React.memo(function DevicePanel({ id, state, zh, agentBusy }: { id: string; state?: DeviceState | undefined; zh: boolean; agentBusy: boolean }) {
   const [open, setOpen] = useState(false);
   const [host, setHost] = useState(state?.host ?? "");
   const [profiles, setProfiles] = useState<DeviceProfile[]>([]);
@@ -53,4 +53,4 @@ export function DevicePanel({ id, state, zh, agentBusy }: { id: string; state?: 
       {error && <p className="workspace-warning" role="alert">{error}</p>}
     </>}
   </section>;
-}
+});

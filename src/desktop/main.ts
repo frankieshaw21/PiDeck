@@ -84,7 +84,16 @@ function bindRuntime(id: string, runtime: PiRuntimeAdapter): void {
   }));
 }
 
-async function openSnapshot(id: string): Promise<SessionSnapshot> {
+const openingSnapshots = new Map<string, Promise<SessionSnapshot>>();
+function openSnapshot(id: string): Promise<SessionSnapshot> {
+  const pending = openingSnapshots.get(id);
+  if (pending) return pending;
+  const opening = loadSnapshot(id).finally(() => openingSnapshots.delete(id));
+  openingSnapshots.set(id, opening);
+  return opening;
+}
+
+async function loadSnapshot(id: string): Promise<SessionSnapshot> {
   const { metadata, state } = await manager.open(id);
   const runtime = manager.runtime(id);
   if (!runtime) throw new Error("Runtime did not open");
@@ -331,11 +340,14 @@ function registerIpc(): void {
   ipcMain.handle("workspace:discover", async (_event, id: string) => {
     id = requireSession(id);
     const metadata = manager.list().find((session) => session.id === id)!;
-    const result = await discoverWorkspace(metadata.projectDir, process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent"));
+    const discovery = discoverWorkspace(metadata.projectDir, process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent"));
+    const commands = manager.runtime(id)?.getCommands();
+    // Start the runtime query alongside filesystem discovery.
+    const [result, skills] = await Promise.all([discovery, commands?.then((value) => ({ value }), (error: unknown) => ({ error }))]);
     try {
-      const runtime = manager.runtime(id);
-      if (!runtime) throw new Error("Session runtime is not open");
-      result.skills = (await runtime.getCommands()).filter((command) => command.source === "skill").map(({ name, description }) => ({ name, ...(description ? { description } : {}) }));
+      if (!skills) throw new Error("Session runtime is not open");
+      if ("error" in skills) throw skills.error;
+      result.skills = skills.value.filter((command) => command.source === "skill").map(({ name, description }) => ({ name, ...(description ? { description } : {}) }));
     } catch (error) { result.skillError = error instanceof Error ? error.message : String(error); }
     return result;
   });
@@ -392,7 +404,7 @@ async function createWindow(): Promise<void> {
 
 app.whenReady().then(async () => {
   deviceProfiles = new DeviceProfileStore(join(app.getPath("userData"), "harness-state", "device-profiles.json"));
-  await deviceProfiles.load();
+  const profilesReady = deviceProfiles.load();
   const trustedHosts = new Map<string, string>();
   devices = new DeviceBroker((state) => window?.webContents.send("devices:changed", state), async (host, fingerprint) => {
     if (trustedHosts.get(host) === fingerprint) return true;
@@ -404,10 +416,10 @@ app.whenReady().then(async () => {
     if (result.response !== 1) return false;
     trustedHosts.set(host, fingerprint); return true;
   });
-  await devices.start();
+  const devicesReady = devices.start();
   contextStore = new ContextStore(join(app.getPath("userData"), "harness-state", "context-edits"));
   extensions = new ExtensionStore(join(app.getPath("userData"), "harness-state", "extensions.json"));
-  await extensions.load();
+  const extensionsReady = extensions.load();
   const pi = await selectedPi();
   manager = new HarnessSessionManager({
     storageDir: join(app.getPath("userData"), "harness-state"),
@@ -427,7 +439,7 @@ app.whenReady().then(async () => {
       publishSessions();
     },
   });
-  await manager.load();
+  await Promise.all([manager.load(), profilesReady, devicesReady, extensionsReady]);
   const stateDir = join(app.getPath("userData"), "harness-state");
   await mkdir(stateDir, { recursive: true });
   projectIndexPath = join(stateDir, "projects.json");

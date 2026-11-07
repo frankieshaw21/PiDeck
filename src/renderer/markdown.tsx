@@ -23,7 +23,7 @@ function Diagram({ source }: { source: string }) {
   return svg ? <div className="mermaid-diagram" dangerouslySetInnerHTML={{ __html: svg }} /> : <pre><code>{source}</code></pre>;
 }
 
-export function MarkdownMessage({ text }: { text: string }) {
+export const MarkdownMessage = React.memo(function MarkdownMessage({ text }: { text: string }) {
   return <div className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm, cjkStrong]} skipHtml components={{
     pre({ children }) {
       const child = React.Children.toArray(children)[0];
@@ -37,4 +37,4 @@ export function MarkdownMessage({ text }: { text: string }) {
     },
     img({ alt }) { return <span>{alt ?? ""}</span>; },
   }}>{text}</ReactMarkdown></div>;
-}
+});

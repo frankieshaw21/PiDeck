@@ -37,6 +37,7 @@ export class PiRpcTransport {
       cwd: this.#options.cwd,
       env: { ...process.env, ...this.#options.env },
       stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
       detached: process.platform !== "win32",
     }) as ChildProcessWithoutNullStreams;
     this.#child = child;
@@ -55,15 +56,10 @@ export class PiRpcTransport {
       this.#events.emit("exit", { code, signal });
     });
     await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(resolve, 100);
-      child.once("error", (error) => {
-        clearTimeout(timer);
-        reject(error);
-      });
-      child.once("exit", (code, signal) => {
-        clearTimeout(timer);
-        reject(new Error(`Pi exited during startup (code=${String(code)}, signal=${String(signal)})`));
-      });
+      const onError = (error: Error) => { child.off("spawn", onSpawn); reject(error); };
+      const onSpawn = () => { child.off("error", onError); resolve(); };
+      child.once("error", onError);
+      child.once("spawn", onSpawn);
     });
   }
 

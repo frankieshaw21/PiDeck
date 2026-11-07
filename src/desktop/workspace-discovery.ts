@@ -17,12 +17,25 @@ export async function discoverWorkspace(project: string, agentDir: string): Prom
   }
   const directories = [agentDir];
   for (let dir = project; ; dir = dirname(dir)) { directories.push(dir); if (dirname(dir) === dir) break; }
-  for (const dir of [...new Set(directories)]) {
-    for (const name of ["AGENTS.override.md", "AGENTS.md", "AGENTS.MD", "CLAUDE.md", "CLAUDE.MD"]) {
+  // Check directories concurrently, preserving both scope order and filename precedence.
+  const discoveries = await Promise.all([...new Set(directories)].map(async (dir) => {
+    const instructions: WorkspaceDiscovery["instructions"] = [];
+    const warnings: WorkspaceDiscovery["warnings"] = [];
+    const names = ["AGENTS.override.md", "AGENTS.md", "AGENTS.MD", "CLAUDE.md", "CLAUDE.MD"];
+    const checks = await Promise.all(names.map(async (name) => {
       const path = join(dir, name);
-      try { if ((await stat(path)).isFile()) { result.instructions.push({ name, path, scope: dir === agentDir ? "global" : "project" }); break; } }
-      catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") result.warnings.push({ path, message: error instanceof Error ? error.message : String(error) }); }
+      try { return { name, path, file: (await stat(path)).isFile() }; }
+      catch (error) { return { name, path, error: error as NodeJS.ErrnoException }; }
+    }));
+    for (const check of checks) {
+      if (check.file) { instructions.push({ name: check.name, path: check.path, scope: dir === agentDir ? "global" : "project" }); break; }
+      if (check.error && check.error.code !== "ENOENT") warnings.push({ path: check.path, message: check.error.message });
     }
+    return { instructions, warnings };
+  }));
+  for (const discovery of discoveries) {
+    result.instructions.push(...discovery.instructions);
+    result.warnings.push(...discovery.warnings);
   }
   return result;
 }
