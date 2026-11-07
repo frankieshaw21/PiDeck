@@ -16,7 +16,7 @@ contextBridge.exposeInMainWorld('piHarness', {
  listSessions:async()=>[{...metadata,status:'Idle'}], listProjects:async()=>[{path:'project',name:'Project'}],
  onSessionsChanged:()=>()=>{}, onRuntimeEvent:()=>()=>{},
  openSession:async()=>{opens++;return {metadata,state:{sessionId:'pi',isStreaming:false,isCompacting:false,messageCount:1200,pendingMessageCount:0},messages,status:'Idle'};},
- listModels:async()=>[], listDeviceProfiles:async()=>[], testOpenCount:()=>opens
+ listModels:async()=>[], listDeviceProfiles:async()=>[], getThinkingSettings:async()=>({level:'off',levels:['off']}), testOpenCount:()=>opens
 });
 `);
 app.whenReady().then(async () => {
@@ -46,4 +46,5 @@ app.whenReady().then(async () => {
  } catch(error) { console.error(error); process.exitCode=1; }
  finally { window.destroy(); app.quit(); }
 });
-app.on('quit',()=>rmSync(root,{recursive:true,force:true,maxRetries:5,retryDelay:100}));
+// Chromium may hold profile files until process exit on Windows. Cleanup is best effort.
+app.on('quit',()=>{try{rmSync(root,{recursive:true,force:true});}catch{}});

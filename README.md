@@ -41,8 +41,8 @@ isolated desktop profile, including history paging, lazy work logs, and repeat o
 
 ## SSH devices
 
-Open a conversation and expand **SSH · Connect device / 连接设备** above the
-messages. Enter the address, port, username, and password, verify the host-key
+Open a conversation and select **Connect device / 连接设备** above the
+messages to open its side panel. Enter the address, port, username, and password, verify the host-key
 fingerprint, then connect. You can ask the Agent to inspect the attached device
 or submit commands manually in the same panel. The workspace's Connections tab
 summarizes devices across conversations. Live output is bounded and kept in memory.
@@ -54,6 +54,13 @@ shell retains its current mode and environment. Commands run one at a time and
 time out after 120 seconds. Interrupting a command disconnects the device.
 Passwords and live connections are not saved. Device names are stored locally
 per conversation. The login username defaults to `admin`.
+
+The composer groups the model, **Think level**, and execution mode. Thinking
+levels come from the selected model's Pi runtime; models without adjustable
+thinking show a disabled control. Model and thinking changes are disabled while
+a session is running or queued. The mode defaults to **May write / 允许写入**,
+preserving existing execution behavior. **Analyze / 分析** changes scheduling
+intent; it is not a filesystem permission boundary.
 
 Prompt recognition is heuristic and may not work with every custom prompt.
 Telnet, interactive programs, paging, and full terminal emulation are not yet supported.

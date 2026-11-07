@@ -20,6 +20,7 @@ for (const failFirst of [false, true]) {
         getState: async () => state, setSessionName: async () => {}, dispose: async () => { disposed++; },
         getMessages: async () => [], getEntries: async () => ({ entries: [], leafId: null }), getContextUsage: async () => null,
         getAvailableModels: async () => [], getCommands: async () => [], setModel: async () => {}, respondToExtensionUi: async () => {},
+        getAvailableThinkingLevels: async () => ["off"], setThinkingLevel: async () => {},
         subscribe: () => () => {}, abort: async () => {}, prompt: async () => ({ disposition: "started", runId: "run" }),
       } satisfies PiRuntimeAdapter;
     } });

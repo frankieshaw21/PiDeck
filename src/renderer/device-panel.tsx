@@ -2,9 +2,16 @@ import React, { useEffect, useRef, useState } from "react";
 import type { DeviceState } from "../desktop/devices.js";
 import type { DeviceProfile } from "../desktop/device-profiles.js";
 import { deviceOutput } from "./device-output.js";
+import { Icon } from "./icon.js";
 
-export const DevicePanel = React.memo(function DevicePanel({ id, state, zh, agentBusy }: { id: string; state?: DeviceState | undefined; zh: boolean; agentBusy: boolean }) {
+export const DevicePanel = React.memo(function DevicePanel({ id, state, zh, agentBusy, drawer = false }: { id: string; state?: DeviceState | undefined; zh: boolean; agentBusy: boolean; drawer?: boolean }) {
   const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!open || !drawer) return;
+    const close = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(false); };
+    document.addEventListener("keydown", close);
+    return () => document.removeEventListener("keydown", close);
+  }, [open, drawer]);
   const [host, setHost] = useState(state?.host ?? "");
   const [profiles, setProfiles] = useState<DeviceProfile[]>([]);
   const [profileId, setProfileId] = useState("");
@@ -29,9 +36,10 @@ export const DevicePanel = React.memo(function DevicePanel({ id, state, zh, agen
     catch (e) { setError(String(e)); }
     finally { setSubmitting(false); }
   }
-  return <section className="device-panel">
-    <div className="device-heading"><button type="button" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? "▾" : "▸"} SSH · {state?.name || name || (state ? `${state.username}@${state.host}:${state.port}` : (zh ? "连接设备" : "Connect device"))}</button><span>{connecting ? (zh ? "连接中…" : "Connecting…") : connected ? (state?.busy ? (zh ? "执行中" : "Executing") : (zh ? "已连接" : "Connected")) : (zh ? "未连接" : "Disconnected")}</span></div>
-    {open && <>
+  return <section className={`device-panel${drawer ? " device-drawer-mode" : ""}`}>
+    <div className="device-heading">{drawer && <span className="device-project"><Icon name="folder" />{zh ? "当前项目" : "Current project"}</span>}<button type="button" aria-expanded={open} onClick={() => setOpen(!open)}><Icon name="terminal" />{state?.name || name || (state ? `${state.username}@${state.host}:${state.port}` : (zh ? "连接设备" : "Connect device"))}</button><span className={connected ? "device-connected" : ""}>{connecting ? (zh ? "连接中…" : "Connecting…") : connected ? (state?.busy ? (zh ? "执行中" : "Executing") : (zh ? "已连接" : "Connected")) : (zh ? "未连接" : "Disconnected")}</span></div>
+    {open && <div className={drawer ? "device-drawer" : "device-body"} role={drawer ? "complementary" : undefined} aria-label={zh ? "会话设备" : "Session device"}>
+      {drawer && <div className="device-drawer-heading"><strong>{zh ? "会话设备" : "Session device"}</strong><button autoFocus onClick={() => setOpen(false)} aria-label={zh ? "关闭设备面板" : "Close device panel"}><Icon name="close" /></button></div>}
       {!connected && <form className="device-connect" onSubmit={(event) => { event.preventDefault(); void connect(); }}>
         <p>{zh ? "命令将原样发送到 SSH 连接。登录密码仅用于本次连接。" : "Commands are sent directly over SSH. The password is used only for this connection."}</p>
         <label>{zh ? "已保存配置" : "Saved profiles"}<select value={profileId} disabled={connecting} onChange={(event) => { const selected = profiles.find((item) => item.id === event.target.value); setProfileId(event.target.value); if (selected) { setHost(selected.host); setPort(selected.port); setUsername(selected.username); setProfileName(selected.name); } else { setProfileName(""); } }}><option value="">{zh ? "新配置" : "New profile"}</option>{profiles.filter((item) => item.protocol === "ssh").map((item) => <option key={item.id} value={item.id}>{item.name} · {item.host}</option>)}</select></label>
@@ -51,6 +59,6 @@ export const DevicePanel = React.memo(function DevicePanel({ id, state, zh, agen
       }}><input aria-label={zh ? "设备命令" : "Device command"} value={command} disabled={state?.busy || agentBusy} placeholder={zh ? "输入设备命令" : "Device command"} onChange={(e) => setCommand(e.target.value)} /><button disabled={state?.busy || agentBusy || !command.trim()}>{zh ? "执行" : "Run"}</button></form>}
       {(connected || connecting) && <button type="button" onClick={() => void window.piHarness.disconnectDevice(id).catch((e) => setError(String(e)))}>{state?.busy ? (zh ? "中断并断开" : "Interrupt and disconnect") : (zh ? "断开" : "Disconnect")}</button>}
       {error && <p className="workspace-warning" role="alert">{error}</p>}
-    </>}
+    </div>}
   </section>;
 });

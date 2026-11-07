@@ -4,7 +4,7 @@ import type { DeviceConfig, DeviceState } from "./devices.js";
 import type { DeviceProfile } from "./device-profiles.js";
 import type { HarnessSessionMetadata } from "../core/session-manager.js";
 import type { TaskIntent } from "../core/execution-controller.js";
-import type { ContextUsage, ExtensionUiResponse, ImageAttachment, PiSessionState, RuntimeEvent } from "../runtime/types.js";
+import type { ContextUsage, ExtensionUiResponse, ImageAttachment, PiSessionState, RuntimeEvent, ThinkingLevel } from "../runtime/types.js";
 
 export type ExecutionStatus = "Idle" | "Queued" | "Running" | "WaitingForUser" | "Stopping" | "Failed";
 
@@ -68,6 +68,8 @@ export interface DesktopApi {
   setExtensionEnabled(path: string, enabled: boolean): Promise<ManagedExtension[]>;
   removeExtension(path: string): Promise<ManagedExtension[]>;
   setModel(id: string, provider: string, modelId: string): Promise<void>;
+  getThinkingSettings(id: string): Promise<{ level: ThinkingLevel; levels: ThinkingLevel[] }>;
+  setThinkingLevel(id: string, level: ThinkingLevel): Promise<PiSessionState>;
   respondToExtensionUi(id: string, response: ExtensionUiResponse): Promise<void>;
   onRuntimeEvent(listener: (event: RuntimeEvent) => void): () => void;
   onSessionsChanged(listener: (sessions: SessionSummary[]) => void): () => void;

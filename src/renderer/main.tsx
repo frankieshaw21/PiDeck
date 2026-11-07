@@ -12,6 +12,9 @@ import type { DeviceState } from "../desktop/devices.js";
 import { applyAssistantEnd, applyMessageUpdate, applyToolEvent, groupMessages, groupTimeline, type ViewItem } from "./activity.js";
 import "./styles.css";
 import "./language.css";
+import "./layout.css";
+import { Icon } from "./icon.js";
+import type { ThinkingLevel, PiSessionState } from "../runtime/types.js";
 
 type Language = "zh" | "en";
 const translations = {
@@ -58,7 +61,7 @@ function historyItems(messages: unknown[]): ViewItem[] {
 
 function WorkLog({ segment, language }: { segment: ViewItem[]; language: Language }) {
   const [open, setOpen] = useState(false);
-  return <details className="work-log" onToggle={(event) => setOpen(event.currentTarget.open)}><summary>Work log <span>{segment.length}</span></summary>{open && (<div className="work-log-entries">{segment.map((item) => <details key={item.key} className="tool-activity"><summary>{item.kind === "thinking" ? (item.streaming ? (language === "zh" ? "正在思考…" : "Thinking…") : (language === "zh" ? "思考过程" : "Thinking")) : (language === "zh" ? item.text.replace(/^Running (.*)…$/, "正在运行 $1…").replace(/^(.*) finished$/, "$1 已完成").replace(/^(.*) failed$/, "$1 失败") : item.text)}</summary><pre>{item.kind === "thinking" ? item.text || (language === "zh" ? "等待内容…" : "Waiting for content…") : item.detail || (language === "zh" ? "暂无详情" : "No details available")}</pre></details>)}</div>)}</details>;
+  return <details className="work-log" onToggle={(event) => setOpen(event.currentTarget.open)}><summary>{language === "zh" ? "工作记录" : "Work log"} <span>{segment.length}</span></summary>{open && (<div className="work-log-entries">{segment.map((item) => <details key={item.key} className="tool-activity"><summary>{item.kind === "thinking" ? (item.streaming ? (language === "zh" ? "正在思考…" : "Thinking…") : (language === "zh" ? "思考过程" : "Thinking")) : (language === "zh" ? item.text.replace(/^Running (.*)…$/, "正在运行 $1…").replace(/^(.*) finished$/, "$1 已完成").replace(/^(.*) failed$/, "$1 失败") : item.text)}</summary><pre>{item.kind === "thinking" ? item.text || (language === "zh" ? "等待内容…" : "Waiting for content…") : item.detail || (language === "zh" ? "暂无详情" : "No details available")}</pre></details>)}</div>)}</details>;
 }
 
 function App() {
@@ -79,7 +82,7 @@ function App() {
   useEffect(() => { localStorage.setItem("ui-language", language); document.documentElement.lang = language === "zh" ? "zh-CN" : "en"; }, [language]);
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     const saved = Number(localStorage.getItem("sidebar-width"));
-    return Number.isFinite(saved) && saved >= 200 && saved <= 480 ? saved : 260;
+    return Number.isFinite(saved) && saved >= 200 && saved <= 480 ? saved : 222;
   });
   useEffect(() => { localStorage.setItem("sidebar-width", String(sidebarWidth)); }, [sidebarWidth]);
   const [project, setProject] = useState<string | null>(null);
@@ -457,7 +460,7 @@ function App() {
       [selected.metadata.id]: [...(current[selected.metadata.id] ?? []), { key, kind: "user", text, images: attached, files: attachedFiles, delivery: "pending" }],
     }));
     try {
-      await window.piHarness.prompt(targetId, promptText, "write", attached);
+      await window.piHarness.prompt(targetId, promptText, sessionModes[targetId] ?? "write", attached);
       setItems((current) => ({ ...current, [targetId]: (current[targetId] ?? []).map((item) => item.key === key ? { ...item, delivery: undefined } : item) }));
     } catch (value) {
       const cancelled = String(value).includes("Queued task cancelled");
@@ -481,12 +484,34 @@ function App() {
   const running = selectedSummary && ["Queued", "Running", "WaitingForUser", "Stopping"].includes(selectedSummary.status);
   const currentModel = selected?.state.model ? `${selected.state.model.provider}/${selected.state.model.id}` : "";
 
+  const [modelChanging, setModelChanging] = useState(false);
+  const [sessionModes, setSessionModes] = useState<Record<string, "analysis" | "write">>({});
+  const [thinkingChanging, setThinkingChanging] = useState(false);
+  const [thinkingSettings, setThinkingSettings] = useState<{ sessionId: string; model: string; level: ThinkingLevel; levels: ThinkingLevel[] } | null>(null);
+  useEffect(() => {
+    if (!sessionId) return;
+    let active = true;
+    setThinkingSettings(null);
+    void window.piHarness.getThinkingSettings(sessionId).then((settings) => {
+      if (active) setThinkingSettings({ sessionId, model: currentModel, ...settings });
+    }).catch((reason) => { if (active) showError(reason); });
+    return () => { active = false; };
+  }, [sessionId, currentModel]);
+  function updateSessionState(id: string, state: PiSessionState) {
+    const cached = snapshotsRef.current.get(id);
+    if (cached) snapshotsRef.current.set(id, { ...cached, state });
+    setSelected((current) => current?.metadata.id === id ? { ...current, state } : current);
+  }
+  const activeThinking = thinkingSettings && thinkingSettings.sessionId === sessionId && thinkingSettings.model === currentModel ? thinkingSettings : null;
+  const controlsBusy = Boolean(running) || modelChanging || thinkingChanging;
+
   return <main className="shell" style={{ "--sidebar-width": `${sidebarWidth}px` } as React.CSSProperties}>
     <aside className="sidebar">
+      <div className="brand"><span>π</span> PiDeck</div>
       <div className="project">
         <div className="project-heading"><small>{t.project}</small><div className="project-actions">
-          <button onClick={() => void chooseProject()} title={language === "zh" ? "添加项目" : "Add project"} aria-label={language === "zh" ? "添加项目" : "Add project"}>＋</button>
-          <button onClick={() => { const item = projects.find((entry) => entry.path === project); if (item) { setProjectRename({ path: item.path, value: item.name }); setProjectRenameError(null); } }} disabled={!project} title={language === "zh" ? "编辑项目名称" : "Edit project name"} aria-label={language === "zh" ? "编辑项目名称" : "Edit project name"}>✎</button>
+          <button onClick={() => void chooseProject()} title={language === "zh" ? "添加项目" : "Add project"} aria-label={language === "zh" ? "添加项目" : "Add project"}><Icon name="plus" /></button>
+          <button onClick={() => { const item = projects.find((entry) => entry.path === project); if (item) { setProjectRename({ path: item.path, value: item.name }); setProjectRenameError(null); } }} disabled={!project} title={language === "zh" ? "编辑项目名称" : "Edit project name"} aria-label={language === "zh" ? "编辑项目名称" : "Edit project name"}><Icon name="edit" /></button>
           <button onClick={() => void removeProject()} disabled={!project} title={language === "zh" ? "移除项目" : "Remove project"} aria-label={language === "zh" ? "移除项目" : "Remove project"}>−</button>
         </div></div>
           <select aria-label={t.chooseProject} title={project ?? t.chooseProject} value={project ?? ""} onChange={(event) => switchProject(event.target.value || null)}>
@@ -494,19 +519,20 @@ function App() {
             {projects.map((item) => <option key={item.path} value={item.path}>{item.name} — {item.path}</option>)}
           </select>
       </div>
-      <div className="session-heading"><span>{t.sessions}</span></div>
-      <div className="session-search"><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t.search} aria-label={t.search} /><button onClick={() => void createSession()} aria-label={t.newSession}>＋</button></div>
+      <button className="new-session" onClick={() => void createSession()}><Icon name="edit" />{t.newSession}<Icon name="plus" /></button>
+      <label className="session-search"><Icon name="search" /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t.search} aria-label={t.search} /></label>
+      <div className="session-heading"><span>{t.sessions}</span><span>{sessions.filter((entry) => entry.projectDir === project).length}</span></div>
       <nav className="sessions">
         {sessions.filter((session) => (project && session.projectDir === project) && session.name.toLowerCase().includes(search.toLowerCase())).map((session) =>
           <div key={session.id} className={!workspace && selected?.metadata.id === session.id ? "session active" : "session"}>
             <button className="session-open" onClick={() => void openSession(session.id)}><span className={`dot ${session.status.toLowerCase()}`} />
               <span className="session-copy"><strong>{session.name}</strong><small>{statusText(session.status)}</small></span></button>
-            <button className="session-action" title={t.rename} aria-label={t.rename} onClick={() => { setRenameTarget({ id: session.id, name: session.name }); setRenameValue(session.name); setRenameError(null); }}>✎</button>
-            <button className="session-action session-delete" title={t.delete} aria-label={t.delete} onClick={() => void deleteSession(session.id, session.name)}>×</button>
+            <button className="session-action" title={t.rename} aria-label={t.rename} onClick={() => { setRenameTarget({ id: session.id, name: session.name }); setRenameValue(session.name); setRenameError(null); }}><Icon name="edit" /></button>
+            <button className="session-action session-delete" title={t.delete} aria-label={t.delete} onClick={() => void deleteSession(session.id, session.name)}><Icon name="close" /></button>
           </div>)}
       </nav>
-      <button className={workspace ? "workspace-link active" : "workspace-link"} onClick={() => setWorkspace(true)}>▱ <span>{t.workspace}</span></button>
-      <button className="workspace-link login-link" onClick={() => setShowLogin(true)}>♙ <span>{language === "zh" ? "登录" : "Sign in"}</span></button>
+      <button className={workspace ? "workspace-link active" : "workspace-link"} onClick={() => setWorkspace(true)}><Icon name="workspace" /><span>{t.workspace}</span><Icon name="chevron" /></button>
+      <button className="workspace-link login-link" onClick={() => setShowLogin(true)}><Icon name="user" /><span>{language === "zh" ? "登录" : "Sign in"}</span></button>
       <label className="language-control"><span>{t.language}</span><select aria-label={t.language} value={language} onChange={(event) => setLanguage(event.target.value as Language)}><option value="zh">中文</option><option value="en">English</option></select></label>
       <div className="sidebar-resizer" role="separator" aria-orientation="vertical" aria-label={language === "zh" ? "调整侧边栏宽度" : "Resize sidebar"} aria-valuemin={200} aria-valuemax={480} aria-valuenow={sidebarWidth} tabIndex={0}
         onPointerDown={(event) => { if (event.button === 0) event.currentTarget.setPointerCapture(event.pointerId); }}
@@ -543,20 +569,12 @@ function App() {
           {discovery.warnings.map((warning, i) => <p className="workspace-warning" key={i}>{warning.path}: {warning.message}</p>)}
         </div>}</div> : selected ? <>
         <header className="chat-header">
-          <div><h1>{selected.metadata.name}</h1><select className="model-select" value={currentModel} disabled={Boolean(running)} onChange={(event) => {
-            const option = models.find((model) => `${model.provider}/${model.id}` === event.target.value);
-            if (!option) return;
-            void window.piHarness.setModel(selected.metadata.id, option.provider, option.id).then(async () => {
-              const snapshot = await window.piHarness.openSession(selected.metadata.id);
-              snapshotsRef.current.set(snapshot.metadata.id, { ...snapshot, messages: [] });
-              setSelected((current) => current?.metadata.id === snapshot.metadata.id ? snapshot : current);
-            }).catch(showError);
-          }}><option value={currentModel}>{currentModel || t.noModel}</option>{models.filter((model) => `${model.provider}/${model.id}` !== currentModel).map((model) => <option key={`${model.provider}/${model.id}`} value={`${model.provider}/${model.id}`}>{model.name ?? `${model.provider}/${model.id}`}</option>)}</select></div>
+          <div className="chat-title"><div className="chat-breadcrumb"><span>{projects.find((entry) => entry.path === selected.metadata.projectDir)?.name ?? "PiDeck"}</span><Icon name="chevron" /><span>{t.sessions}</span></div><h1>{selected.metadata.name}</h1></div>
           <div className="status-stack"><span className={`status ${selectedSummary?.status.toLowerCase()}`}>{statusText(selectedSummary?.status ?? "Idle")}</span>
             {Object.values(extensionStatus[selected.metadata.id] ?? {}).filter(Boolean).map((text, index) => <small key={index}>{text}</small>)}
           </div>
         </header>
-        <DevicePanel key={selected.metadata.id} id={selected.metadata.id} state={devices[selected.metadata.id]} zh={language === "zh"} agentBusy={Boolean(running)} />
+        <DevicePanel drawer key={selected.metadata.id} id={selected.metadata.id} state={devices[selected.metadata.id]} zh={language === "zh"} agentBusy={Boolean(running)} />
         <div className="messages" ref={messagesRef} onScroll={(event) => { const element = event.currentTarget; followMessagesRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 48; }}>
           {!currentItems?.length && <div className="empty"><span>π</span><h2>{t.start}</h2><p>{t.empty}</p></div>}
           {messageGroups.length > visibleGroups && <button onClick={() => { followMessagesRef.current = false; setVisibleGroups((count) => count + 30); }}>{language === "zh" ? "加载更早消息" : "Load earlier messages"}</button>}
@@ -569,7 +587,39 @@ function App() {
         <footer className="composer">
           {selectedSummary?.status === "Queued" && <div className="queue-hint" role="status">{sessions.some((entry) => entry.id !== selected.metadata.id && entry.projectDir === selected.metadata.projectDir && ["Running", "WaitingForUser", "Stopping"].includes(entry.status)) ? (language === "zh" ? "同一项目有任务正在执行；完成后将自动开始。" : "Another task in this project is active; this will start when it finishes.") : (language === "zh" ? "正在等待可用的执行名额，满足条件后将自动开始。" : "Waiting for an available execution slot; this will start automatically.")} {language === "zh" ? "点击停止可取消排队。" : "Use Stop to cancel."}</div>}
           {error && <div className="error" onClick={() => setError(null)}>{error}</div>}
-          <div className="context-wrap" ref={contextRef}><button className="context-toggle" onClick={() => setShowContext(!showContext)} aria-expanded={showContext}>▱ &nbsp; {t.context} {showContext ? "⌄" : "⌃"}</button>{showContext && <div className="context-popover"><strong>{t.currentSession}</strong>
+          {files.length > 0 && <div className="pending-files">{files.map((file, index) => <div key={`${file.name}-${index}`}><details><summary>📄 {file.name}</summary><pre>{file.content}</pre></details><button type="button" disabled={Boolean(running)} aria-label={language === "zh" ? `移除 ${file.name}` : `Remove ${file.name}`} onClick={() => setFiles((current) => current.filter((_, i) => i !== index))}><Icon name="close" /></button></div>)}</div>}
+          {images.length > 0 && <div className="image-previews">{images.map((image, index) => <div key={index}><img src={`data:${image.mimeType};base64,${image.data}`} alt={language === "zh" ? "图片预览" : "Image preview"} /><button type="button" aria-label={language === "zh" ? "移除图片" : "Remove image"} onClick={() => setImages((current) => current.filter((_, i) => i !== index))}><Icon name="close" /></button></div>)}</div>}
+          <div className="composer-box">
+          <textarea onPaste={(event) => { const files = Array.from(event.clipboardData.files).filter((file) => file.type.startsWith("image/")); if (files.length) { event.preventDefault(); void addImages(files); } }} value={draft} onChange={(event) => setDraft(event.target.value)} disabled={controlsBusy} placeholder={running ? t.working : t.message} onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) { event.preventDefault(); if (!controlsBusy) void send(); }
+          }} />
+          <div className="composer-tools"><div className="composer-controls">
+          <input ref={fileInputRef} type="file" multiple hidden onChange={(event) => { void addFiles(Array.from(event.target.files ?? [])); event.target.value = ""; }} />
+          <button type="button" className="image-attach" disabled={Boolean(running)} aria-label={language === "zh" ? "添加文本文件" : "Add text files"} title={language === "zh" ? "添加文本文件" : "Add text files"} onClick={() => fileInputRef.current?.click()}><Icon name="attach" /></button>
+          <input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden onChange={(event) => { void addImages(Array.from(event.target.files ?? [])); event.target.value = ""; }} />
+          <button type="button" className="image-attach" disabled={Boolean(running)} aria-label={language === "zh" ? "添加图片" : "Add images"} title={language === "zh" ? "添加图片" : "Add images"} onClick={() => imageInputRef.current?.click()}><Icon name="image" /></button>
+<select className="model-select" value={currentModel} aria-label={language === "zh" ? "选择模型" : "Model"} disabled={controlsBusy} onChange={(event) => {
+            const option = models.find((model) => `${model.provider}/${model.id}` === event.target.value);
+            if (!option) return;
+            setModelChanging(true);
+            void window.piHarness.setModel(selected.metadata.id, option.provider, option.id).then(async () => {
+              const snapshot = await window.piHarness.openSession(selected.metadata.id);
+              snapshotsRef.current.set(snapshot.metadata.id, { ...snapshot, messages: [] });
+              setSelected((current) => current?.metadata.id === snapshot.metadata.id ? snapshot : current);
+            }).catch(showError).finally(() => setModelChanging(false));
+          }}><option value={currentModel}>{selected.state.model?.name ?? selected.state.model?.id ?? t.noModel}</option>{models.filter((model) => `${model.provider}/${model.id}` !== currentModel).map((model) => <option key={`${model.provider}/${model.id}`} value={`${model.provider}/${model.id}`}>{model.name ?? `${model.provider}/${model.id}`}</option>)}</select><label className="thinking-control"><Icon name="brain" /><span>Think</span><select aria-label="Think level" value={activeThinking?.level ?? ""} disabled={controlsBusy || !activeThinking || activeThinking.levels.length < 2} title={!activeThinking ? (language === "zh" ? "正在读取模型支持的思考级别" : "Loading thinking levels") : activeThinking.levels.length < 2 ? (language === "zh" ? "此模型不支持调整思考级别" : "This model does not support adjustable thinking") : "Think level"} onChange={(event) => {
+            const id = selected.metadata.id;
+            const level = event.target.value as ThinkingLevel;
+            setThinkingChanging(true);
+            void window.piHarness.setThinkingLevel(id, level).then((state) => {
+              updateSessionState(id, state);
+              setThinkingSettings((current) => current?.sessionId === id ? { ...current, level: state.thinkingLevel ?? level } : current);
+            }).catch(showError).finally(() => setThinkingChanging(false));
+          }}>{!activeThinking && <option value="">…</option>}{activeThinking?.levels.map((level) => <option key={level} value={level}>{level === "xhigh" ? "XHigh" : level[0]!.toUpperCase() + level.slice(1)}</option>)}</select></label><select className="mode-select" aria-label={t.mode} title={t.intentTitle} disabled={controlsBusy} value={sessionModes[selected.metadata.id] ?? "write"} onChange={(event) => setSessionModes((current) => ({ ...current, [selected.metadata.id]: event.target.value as "analysis" | "write" }))}><option value="analysis">{t.analyze}</option><option value="write">{t.write}</option></select></div>
+          <button className={running ? "stop" : "send"} aria-label={running ? t.stop : t.send} disabled={!running && (controlsBusy || (!draft.trim() && !images.length && !files.length))} onClick={() => running ? void window.piHarness.abort(selected.metadata.id) : void send()}>{running ? t.stop : <Icon name="up" />}</button>
+          </div></div>
+
+          <div className="context-wrap" ref={contextRef}><button className="context-toggle" onClick={() => setShowContext(!showContext)} aria-expanded={showContext}><Icon name="layers" />{t.context} {showContext ? "⌄" : "⌃"}</button>{showContext && <div className="context-popover"><strong>{t.currentSession}</strong>
             <div><span>{language === "zh" ? "上下文用量" : "Context usage"}</span><small>{contextLoading ? (language === "zh" ? "读取中…" : "Loading…") : contextUsage?.percent != null ? `${contextUsage.percent.toFixed(1)}%` : (language === "zh" ? "暂不可用" : "Unavailable")}</small></div>
             {contextUsage?.percent != null && <><progress max={100} value={Math.min(contextUsage.percent, 100)} aria-label={language === "zh" ? "上下文用量" : "Context usage"} /><p>{contextUsage.tokens?.toLocaleString()} / {contextUsage.contextWindow.toLocaleString()} tokens</p></>}
             <div><span>{language === "zh" ? "上次模型请求" : "Last model request"}</span><small>{modelUsages[selected.metadata.id] ? (language === "zh" ? "服务商返回" : "Provider reported") : (language === "zh" ? "暂无数据" : "Unavailable")}</small></div>
@@ -578,24 +628,12 @@ function App() {
             <div><span>{language === "zh" ? "模型" : "Model"}</span><small title={currentModel}>{currentModel || t.noModel}</small></div>
             <div><span>{language === "zh" ? "待发送附件" : "Pending attachments"}</span><small>{images.length || files.length ? (language === "zh" ? `${images.length} 张图片 · ${files.length} 个文件` : `${images.length} image(s) · ${files.length} file(s)`) : (language === "zh" ? "无" : "None")}</small></div>
             <p>{language === "zh" ? "文件作为消息内容发送，发送前可移除。" : "Files are sent as message content and can be removed before sending."}</p><button className="context-manage-button" onClick={() => void openContextManager()}>{language === "zh" ? "管理上下文" : "Manage context"}</button>
-          </div>}</div>
-          {files.length > 0 && <div className="pending-files">{files.map((file, index) => <div key={`${file.name}-${index}`}><details><summary>📄 {file.name}</summary><pre>{file.content}</pre></details><button type="button" disabled={Boolean(running)} aria-label={language === "zh" ? `移除 ${file.name}` : `Remove ${file.name}`} onClick={() => setFiles((current) => current.filter((_, i) => i !== index))}>×</button></div>)}</div>}
-          {images.length > 0 && <div className="image-previews">{images.map((image, index) => <div key={index}><img src={`data:${image.mimeType};base64,${image.data}`} alt={language === "zh" ? "图片预览" : "Image preview"} /><button type="button" aria-label={language === "zh" ? "移除图片" : "Remove image"} onClick={() => setImages((current) => current.filter((_, i) => i !== index))}>×</button></div>)}</div>}
-          <div className="composer-box">
-          <input ref={fileInputRef} type="file" multiple hidden onChange={(event) => { void addFiles(Array.from(event.target.files ?? [])); event.target.value = ""; }} />
-          <button type="button" className="image-attach" disabled={Boolean(running)} aria-label={language === "zh" ? "添加文本文件" : "Add text files"} title={language === "zh" ? "添加文本文件" : "Add text files"} onClick={() => fileInputRef.current?.click()}>📎</button>
-          <input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden onChange={(event) => { void addImages(Array.from(event.target.files ?? [])); event.target.value = ""; }} />
-          <button type="button" className="image-attach" disabled={Boolean(running)} aria-label={language === "zh" ? "添加图片" : "Add images"} title={language === "zh" ? "添加图片" : "Add images"} onClick={() => imageInputRef.current?.click()}>＋</button>
-          <textarea onPaste={(event) => { const files = Array.from(event.clipboardData.files).filter((file) => file.type.startsWith("image/")); if (files.length) { event.preventDefault(); void addImages(files); } }} value={draft} onChange={(event) => setDraft(event.target.value)} disabled={Boolean(running)} placeholder={running ? t.working : t.message} onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) { event.preventDefault(); void send(); }
-          }} />
-          <button className={running ? "stop" : "send"} onClick={() => running ? void window.piHarness.abort(selected.metadata.id) : void send()}>{running ? t.stop : t.send}</button>
-          </div>
+          </div>}<span className="composer-hint">{language === "zh" ? "Enter 发送 · Shift + Enter 换行" : "Enter to send · Shift + Enter for a new line"}</span></div>
         </footer>
-      </> : <div className="welcome"><span>π</span><h1>Minimal Pi Harness</h1><p>{t.welcome}</p><button onClick={() => void createSession()}>{t.openProject}</button></div>}
+      </> : <div className="welcome"><span>π</span><h1>PiDeck</h1><p>{t.welcome}</p><button onClick={() => void createSession()}>{t.openProject}</button></div>}
     </section>
     {showLogin && <div className="modal-backdrop login-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowLogin(false); }}><div className="modal login-modal" role="dialog" aria-modal="true" aria-labelledby="login-title" onKeyDown={(event) => { if (event.key === "Escape") setShowLogin(false); }}>
-      <button className="login-close" autoFocus onClick={() => setShowLogin(false)} aria-label={language === "zh" ? "关闭" : "Close"}>×</button>
+      <button className="login-close" autoFocus onClick={() => setShowLogin(false)} aria-label={language === "zh" ? "关闭" : "Close"}><Icon name="close" /></button>
       <div className="login-mark">π</div><h2 id="login-title">{language === "zh" ? "连接模型服务" : "Connect a model provider"}</h2>
       <p>{language === "zh" ? "选择服务商，在终端完成授权后即可在会话中选择模型。" : "Connect a provider in your terminal, then select its model in a session."}</p>
       <div className="provider-list">

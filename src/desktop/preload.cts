@@ -42,6 +42,8 @@ const api: DesktopApi = {
   setExtensionEnabled: (path, enabled) => ipcRenderer.invoke("extensions:enable", path, enabled),
   removeExtension: (path) => ipcRenderer.invoke("extensions:remove", path),
   setModel: (id, provider, modelId) => ipcRenderer.invoke("runtime:set-model", id, provider, modelId),
+  getThinkingSettings: (id) => ipcRenderer.invoke("runtime:thinking-settings", id),
+  setThinkingLevel: (id, level) => ipcRenderer.invoke("runtime:set-thinking-level", id, level),
   respondToExtensionUi: (id, response) => ipcRenderer.invoke("runtime:extension-ui", id, response),
   onRuntimeEvent: (listener) => {
     const wrapped = (_event: Electron.IpcRendererEvent, value: RuntimeEvent) => listener(value);

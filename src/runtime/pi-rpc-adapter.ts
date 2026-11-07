@@ -10,6 +10,7 @@ import type {
   RpcRecord,
   RpcResponse,
   RuntimeEvent,
+  ThinkingLevel,
 } from "./types.js";
 import { PiRpcTransport } from "./pi-rpc-transport.js";
 
@@ -129,6 +130,15 @@ export class PiRpcAdapter implements PiRuntimeAdapter {
   async setModel(provider: string, modelId: string): Promise<unknown> {
     const response = await this.#checked(this.#transport.request({ type: "set_model", provider, modelId }));
     return response.data;
+  }
+
+  async getAvailableThinkingLevels(): Promise<ThinkingLevel[]> {
+    const response = await this.#checked(this.#transport.request({ type: "get_available_thinking_levels" }));
+    return (response.data as { levels: ThinkingLevel[] }).levels;
+  }
+
+  async setThinkingLevel(level: ThinkingLevel): Promise<void> {
+    await this.#checked(this.#transport.request({ type: "set_thinking_level", level }));
   }
 
   respondToExtensionUi(response: ExtensionUiResponse): Promise<void> {

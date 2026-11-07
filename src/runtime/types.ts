@@ -1,4 +1,6 @@
 export type RpcCommand = { id?: string; type: string; [key: string]: unknown };
+export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
+export type ThinkingLevel = typeof THINKING_LEVELS[number];
 
 export type RpcResponse = {
   id?: string;
@@ -24,6 +26,7 @@ export interface PiSessionState {
   isCompacting: boolean;
   messageCount: number;
   pendingMessageCount: number;
+  thinkingLevel?: ThinkingLevel;
   model?: { provider: string; id: string; name?: string };
 }
 
@@ -53,6 +56,8 @@ export interface PiRuntimeAdapter {
   getAvailableModels(): Promise<Array<{ provider: string; id: string; name?: string }>>;
   getCommands(): Promise<Array<{ name: string; source: "extension" | "prompt" | "skill"; description?: string }>>;
   setModel(provider: string, modelId: string): Promise<unknown>;
+  getAvailableThinkingLevels(): Promise<ThinkingLevel[]>;
+  setThinkingLevel(level: ThinkingLevel): Promise<void>;
   respondToExtensionUi(response: ExtensionUiResponse): Promise<void>;
   subscribe(listener: (event: RuntimeEvent) => void): () => void;
   dispose(): Promise<void>;

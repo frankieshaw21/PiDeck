@@ -15,6 +15,7 @@ import { resolvePiCommand } from "./pi-command.js";
 import { DeviceBroker } from "./devices.js";
 import { DeviceProfileStore } from "./device-profiles.js";
 import { PiRpcAdapter } from "../runtime/pi-rpc-adapter.js";
+import { THINKING_LEVELS, type ThinkingLevel } from "../runtime/types.js";
 
 let window: BrowserWindow | undefined;
 let manager: HarnessSessionManager;
@@ -353,10 +354,29 @@ function registerIpc(): void {
   });
   ipcMain.handle("runtime:set-model", async (_event, id: string, provider: string, modelId: string) => {
     id = requireSession(id);
+    if (execution.has(id)) throw new Error("Wait until the session is idle");
     provider = requireText(provider, "Provider", 200);
     modelId = requireText(modelId, "Model ID", 500);
     const runtime = manager.runtime(id) ?? (await manager.open(id), manager.runtime(id));
     await runtime?.setModel(provider, modelId);
+  });
+  ipcMain.handle("runtime:thinking-settings", async (_event, id: string) => {
+    id = requireSession(id);
+    const runtime = manager.runtime(id);
+    if (!runtime) throw new Error("Runtime unavailable");
+    const [state, levels] = await Promise.all([runtime.getState(), runtime.getAvailableThinkingLevels()]);
+    return { level: state.thinkingLevel ?? "off", levels };
+  });
+  ipcMain.handle("runtime:set-thinking-level", async (_event, id: string, level: unknown) => {
+    id = requireSession(id);
+    if (execution.has(id)) throw new Error("Wait until the session is idle");
+    if (!THINKING_LEVELS.includes(level as ThinkingLevel)) throw new Error("Invalid thinking level");
+    const runtime = manager.runtime(id);
+    if (!runtime) throw new Error("Runtime unavailable");
+    if (!(await runtime.getAvailableThinkingLevels()).includes(level as ThinkingLevel)) throw new Error("Thinking level is not supported by this model");
+    if (execution.has(id)) throw new Error("Wait until the session is idle");
+    await runtime.setThinkingLevel(level as ThinkingLevel);
+    return runtime.getState();
   });
   ipcMain.handle("runtime:extension-ui", async (_event, id: string, response) => {
     id = requireSession(id);
@@ -378,7 +398,7 @@ async function createWindow(): Promise<void> {
     minWidth: 820,
     minHeight: 560,
     title: "Minimal Pi Harness",
-    backgroundColor: "#111310",
+    backgroundColor: "#fcfbf9",
     webPreferences: {
       preload: join(import.meta.dirname, "preload.cjs"),
       contextIsolation: true,
