@@ -51,15 +51,17 @@ test("validates network sources and rejects local or credential-bearing URLs", a
   for (const input of ["npm:../../x", "file:///tmp/extension", "https://user:secret@example.com/a/b", "https://example.com/a/%2e%2e/b"]) assert.throws(() => networkPackagePath(input));
 });
 
-test("network install uses isolated Pi storage and loads the resulting package", { skip: process.platform === "win32" }, async () => {
+test("network install uses isolated Pi storage and loads the resulting package", async () => {
   const { chmod } = await import("node:fs/promises");
   const root = await mkdtemp(join(tmpdir(), "harness-network-test-"));
   const store = new ExtensionStore(join(root, "extensions.json"));
-  const script = join(root, "fake-pi");
+  const script = join(root, process.platform === "win32" ? "fake-pi.cmd" : "fake-pi");
+  const scriptBody = join(root, "fake-pi.cjs");
   const manager = new HarnessSessionManager({ storageDir: join(root, "sessions"), piPath: process.env.PI_PATH ?? "pi", extensionPaths: () => store.enabledPaths() });
   try {
-    await writeFile(script, `#!${process.execPath}\nconst fs = require('node:fs'); const path = require('node:path'); const root = path.join(process.env.PI_CODING_AGENT_DIR, 'npm/node_modules/test-package'); fs.mkdirSync(root, {recursive:true}); fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({pi:{extensions:['./index.js']}})); fs.writeFileSync(path.join(root, 'index.js'), "export default function(pi) { pi.registerCommand('network-test', { handler: async () => {} }); }");\n`);
-    await chmod(script, 0o755);
+    await writeFile(scriptBody, `const fs = require('node:fs'); const path = require('node:path'); const root = path.join(process.env.PI_CODING_AGENT_DIR, 'npm/node_modules/test-package'); fs.mkdirSync(root, {recursive:true}); fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({pi:{extensions:['./index.js']}})); fs.writeFileSync(path.join(root, 'index.js'), "export default function(pi) { pi.registerCommand('network-test', { handler: async () => {} }); }");\n`);
+    await writeFile(script, process.platform === "win32" ? `@"${process.execPath}" "${scriptBody}" %*\r\n` : `#!/bin/sh\nexec "${process.execPath}" "${scriptBody}" "$@"\n`);
+    if (process.platform !== "win32") await chmod(script, 0o755);
     await store.addNetwork("npm:test-package@1.0.0", script);
     await manager.load();
     const session = await manager.create(process.cwd());

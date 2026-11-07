@@ -19,6 +19,8 @@ interface HarnessIndex { version: 1; sessions: HarnessSessionMetadata[] }
 export interface SessionManagerOptions {
   storageDir: string;
   piPath?: string;
+  piExecutableArgs?: string[];
+  piEnv?: NodeJS.ProcessEnv;
   extensionPaths?: () => string[];
   adapterFactory?: (options: PiRpcAdapterOptions) => PiRuntimeAdapter;
 }
@@ -28,6 +30,8 @@ export class HarnessSessionManager {
   readonly #indexPath: string;
   readonly #piSessionDir: string;
   readonly #piPath: string | undefined;
+  readonly #piExecutableArgs: string[] | undefined;
+  readonly #piEnv: NodeJS.ProcessEnv | undefined;
   readonly #extensionPaths: () => string[];
   readonly #adapterFactory: (options: PiRpcAdapterOptions) => PiRuntimeAdapter;
   readonly #sessions = new Map<string, HarnessSessionMetadata>();
@@ -38,6 +42,8 @@ export class HarnessSessionManager {
     this.#indexPath = join(options.storageDir, "sessions.json");
     this.#piSessionDir = join(options.storageDir, "pi-sessions");
     this.#piPath = options.piPath;
+    this.#piExecutableArgs = options.piExecutableArgs;
+    this.#piEnv = options.piEnv;
     this.#extensionPaths = options.extensionPaths ?? (() => []);
     this.#adapterFactory = options.adapterFactory ?? ((adapterOptions) => new PiRpcAdapter(adapterOptions));
   }
@@ -150,6 +156,8 @@ export class HarnessSessionManager {
       contextDir: join(this.#storageDir, "context-edits"),
       extraArgs: this.#extensionPaths().flatMap((path) => ["--extension", path]),
       ...(this.#piPath ? { piPath: this.#piPath } : {}),
+      ...(this.#piExecutableArgs ? { piExecutableArgs: this.#piExecutableArgs } : {}),
+      ...(this.#piEnv ? { piEnv: this.#piEnv } : {}),
     });
   }
 

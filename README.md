@@ -28,14 +28,13 @@ supplies desktop interaction and explicit multi-session execution control.
 ## Requirements
 
 - Node.js 22.19 or newer for development
-- Pi Coding Agent 1.5.x installed and authenticated
+- Pi authentication for the desired model provider
 - macOS 12+, Windows 10+, or a current desktop Linux distribution
 
-The packaged application does not bundle or replace Pi. It uses `PI_PATH`, the Pi
-managed launcher, or `pi` on `PATH`, so existing Pi configuration is preserved.
-On Windows, install Pi with npm and ensure its global bin directory is on `PATH`,
-or set `PI_PATH` to the full path of `pi.cmd` before launching the application.
-Restart the application after changing environment variables.
+The application bundles Pi Coding Agent 1.5.0. It uses `PI_PATH` when explicitly
+set, otherwise the bundled Pi, and finally the managed launcher or `pi` on `PATH`
+if the bundle is unavailable. It uses the existing Pi configuration and does not
+replace a separately installed Pi. Restart after changing environment variables.
 
 ## Commands
 

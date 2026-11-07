@@ -20,6 +20,7 @@ export interface PiRpcAdapterOptions {
   sessionDir: string;
   piPath?: string;
   piExecutableArgs?: string[];
+  piEnv?: NodeJS.ProcessEnv;
   extraArgs?: string[];
   contextDir?: string;
 }
@@ -39,7 +40,7 @@ export class PiRpcAdapter implements PiRuntimeAdapter {
       ...(options.piPath ? { piPath: options.piPath } : {}),
       ...(options.piExecutableArgs ? { executableArgs: options.piExecutableArgs } : {}),
       cwd: options.projectDir,
-      ...(options.contextDir ? { env: { HARNESS_CONTEXT_DIR: options.contextDir } } : {}),
+      env: { ...options.piEnv, ...(options.contextDir ? { HARNESS_CONTEXT_DIR: options.contextDir } : {}) },
       args: [
         "--session-id", options.piSessionId,
         "--session-dir", options.sessionDir,

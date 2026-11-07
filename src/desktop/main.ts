@@ -1,4 +1,4 @@
-import { access, stat, readFile, writeFile, mkdir } from "node:fs/promises";
+import { stat, readFile, writeFile, mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -11,6 +11,7 @@ import type { ExecutionStatus, SessionSnapshot, SessionSummary } from "./ipc-con
 import { ContextStore, activeBranch, listContextItems, roundEntryIds, type ContextEdit } from "./context-management.js";
 import { ExtensionStore } from "./extensions.js";
 import { discoverWorkspace } from "./workspace-discovery.js";
+import { resolvePiCommand } from "./pi-command.js";
 
 let window: BrowserWindow | undefined;
 let manager: HarnessSessionManager;
@@ -49,16 +50,8 @@ async function requireProject(value: unknown): Promise<string> {
   return value;
 }
 
-async function resolvePiPath(): Promise<string> {
-  if (process.env.PI_PATH) return process.env.PI_PATH;
-  if (process.platform === "win32") return "pi";
-  const managed = join(homedir(), ".local", "bin", "pi");
-  try {
-    await access(managed);
-    return managed;
-  } catch {
-    return "pi";
-  }
+async function selectedPi() {
+  return resolvePiCommand({ ...(process.env.PI_PATH ? { override: process.env.PI_PATH } : {}), appPath: app.getAppPath(), executable: process.execPath });
 }
 
 function summaries(): SessionSummary[] {
@@ -107,8 +100,9 @@ function registerIpc(): void {
   });
   ipcMain.handle("auth:open-terminal", async () => {
     if (process.platform !== "darwin") throw new Error("Opening a terminal is currently supported on macOS only. Run pi in your terminal instead.");
-    const piPath = await resolvePiPath();
-    const command = "exec '" + piPath.replace(/'/g, "'\\''") + "'";
+    const pi = await selectedPi();
+    const quote = (value: string) => "'" + value.replace(/'/g, "'\\''") + "'";
+    const command = (pi.env?.ELECTRON_RUN_AS_NODE ? "export ELECTRON_RUN_AS_NODE=1; " : "") + "exec " + [pi.path, ...pi.args].map(quote).join(" ");
     await promisify(execFile)("osascript", ["-e", "on run argv", "-e", "tell application \"Terminal\"", "-e", "activate", "-e", "do script (item 1 of argv)", "-e", "end tell", "-e", "end run", command]);
   });
   ipcMain.handle("app:open-external", async (_event, value: unknown) => {
@@ -273,7 +267,7 @@ function registerIpc(): void {
   });
   ipcMain.handle("extensions:add-network", async (_event, source: unknown) => {
     if (typeof source !== "string") throw new Error("Invalid network source");
-    await extensions.addNetwork(source, await resolvePiPath()); return extensions.list();
+    await extensions.addNetwork(source, await selectedPi()); return extensions.list();
   });
   ipcMain.handle("extensions:enable", async (_event, path: unknown, enabled: unknown) => {
     if (typeof path !== "string" || typeof enabled !== "boolean") throw new Error("Invalid extension");
@@ -349,9 +343,12 @@ app.whenReady().then(async () => {
   contextStore = new ContextStore(join(app.getPath("userData"), "harness-state", "context-edits"));
   extensions = new ExtensionStore(join(app.getPath("userData"), "harness-state", "extensions.json"));
   await extensions.load();
+  const pi = await selectedPi();
   manager = new HarnessSessionManager({
     storageDir: join(app.getPath("userData"), "harness-state"),
-    piPath: await resolvePiPath(),
+    piPath: pi.path,
+    piExecutableArgs: pi.args,
+    ...(pi.env ? { piEnv: pi.env } : {}),
     extensionPaths: () => extensions.enabledPaths(),
   });
   execution = new ExecutionController({

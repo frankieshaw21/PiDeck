@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - Node.js 22.19 or newer
-- Pi Coding Agent 1.5.x installed and authenticated
+- Pi authentication for the desired model provider
 - macOS signing certificate and Apple notarization credentials for public macOS distribution
 - Corresponding signing credentials for Windows distribution
 
@@ -24,8 +24,9 @@ npm run dist:linux
 ```
 
 Build each platform on its native CI runner. Artifacts are written to `release/`.
-The application does not bundle Pi; it discovers `PI_PATH`, the managed Pi launcher,
-or `pi` on `PATH`, preserving the user's native authentication and resources.
+The application bundles Pi 1.5.0, uses `PI_PATH` when specified, and falls back to
+the managed launcher or `pi` on `PATH` if the bundle is unavailable. It preserves
+the user's existing authentication and resources.
 
 ## Signing
 

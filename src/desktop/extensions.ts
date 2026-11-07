@@ -2,12 +2,13 @@ import { randomUUID } from "node:crypto";
 import spawn from "cross-spawn";
 import { mkdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
+import type { PiCommand } from "./pi-command.js";
 
 export interface ManagedExtension { path: string; name: string; enabled: boolean; entries: string[]; managedRoot?: string }
 
-function installPackage(piPath: string, source: string, agentDir: string): Promise<void> {
+function installPackage(command: PiCommand, source: string, agentDir: string): Promise<void> {
   return new Promise((resolvePromise, reject) => {
-    const child = spawn(piPath, ["install", source], { env: { ...process.env, PI_CODING_AGENT_DIR: agentDir, PI_OFFLINE: "0" }, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(command.path, [...command.args, "install", source], { env: { ...process.env, ...command.env, PI_CODING_AGENT_DIR: agentDir, PI_OFFLINE: "0" }, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
     let output = "";
     const append = (chunk: Buffer) => { output = (output + chunk.toString()).slice(-4096); };
     child.stdout?.on("data", append); child.stderr?.on("data", append);
@@ -73,7 +74,7 @@ export class ExtensionStore {
     this.entries.push({ path, name: basename(path), enabled: true, entries });
     await this.save();
   }
-  async addNetwork(source: string, piPath: string): Promise<void> {
+  async addNetwork(source: string, piPath: string | PiCommand): Promise<void> {
     source = source.trim();
     if (source.length > 512 || /\s/.test(source)) throw new Error("Invalid network source");
     const packagePath = networkPackagePath(source);
@@ -82,7 +83,7 @@ export class ExtensionStore {
     await mkdir(requestedRoot, { recursive: true });
     const managedRoot = await realpath(requestedRoot);
     try {
-      await installPackage(piPath, source, managedRoot);
+      await installPackage(typeof piPath === "string" ? { path: piPath, args: [] } : piPath, source, managedRoot);
       const entry = await realpath(join(managedRoot, packagePath));
       if (!(await stat(entry)).isDirectory() || relative(managedRoot, entry).startsWith("..")) throw new Error("Installed package was not found");
       this.entries.push({ path: source, name: basename(entry), enabled: true, entries: [entry], managedRoot });
