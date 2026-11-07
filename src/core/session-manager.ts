@@ -168,6 +168,7 @@ export class HarnessSessionManager {
     return this.#adapterFactory({
       harnessSessionId: metadata.id,
       piSessionId: metadata.piSessionId,
+      ...(metadata.piSessionFile ? { piSessionFile: metadata.piSessionFile } : {}),
       projectDir: metadata.projectDir,
       sessionDir: this.#piSessionDir,
       contextDir: join(this.#storageDir, "context-edits"),

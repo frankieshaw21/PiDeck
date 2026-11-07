@@ -9,7 +9,7 @@ function format(value: unknown): string {
   return JSON.stringify(value, null, 2) ?? "";
 }
 
-export function applyToolEvent(list: ViewItem[], record: RpcRecord, sequence: number): void {
+export function applyToolEvent(list: ViewItem[], record: RpcRecord, sequence: number, toolIndexes?: Map<string, number>): void {
   if (record.type === "tool_execution_update") {
     const item = list.find((row) => row.key === `tool-${record.toolCallId}`);
     if (item) item.detail = (item.detail?.split("\n\nOutput:\n")[0] ?? "") + "\n\nOutput:\n" + format(record.partialResult);
@@ -21,14 +21,18 @@ export function applyToolEvent(list: ViewItem[], record: RpcRecord, sequence: nu
   const args = format(record.args);
   const result = format(record.result);
   const detail = [args && `Input:\n${args}`, result && `Output:\n${result}`].filter(Boolean).join("\n\n");
-  const index = id ? list.findIndex((item) => item.key === key) : -1;
+  const index = id ? (toolIndexes ? toolIndexes.get(key) ?? -1 : list.findIndex((item) => item.key === key)) : -1;
   const previous = index >= 0 ? list[index] : undefined;
   const input = record.args && typeof record.args === "object" ? record.args as Record<string, unknown> : undefined;
   const target = input?.command ?? input?.path ?? input?.file_path ?? input?.pattern ?? input?.query;
   const action = previous?.text.replace(/^(Running )/, "").replace(/(…| finished| failed)$/, "") ?? `${name}${typeof target === "string" && target ? `: ${target.replace(/\s+/g, " ").slice(0, 120)}` : ""}`;
   const item: ViewItem = { key, kind: "tool", text: record.type === "tool_execution_start" ? `Running ${action}…` : record.isError ? `${action} failed` : `${action} finished`, detail: detail || previous?.detail || "" };
   if (previous && result && !args && previous.detail) item.detail = `${previous.detail.split("\n\nOutput:\n")[0]}\n\nOutput:\n${result}`;
-  if (index >= 0) list[index] = item; else list.push(item);
+  if (index >= 0) list[index] = item;
+  else {
+    if (id) toolIndexes?.set(key, list.length);
+    list.push(item);
+  }
 }
 
 export function applyMessageUpdate(list: ViewItem[], record: RpcRecord, sequence: number): void {

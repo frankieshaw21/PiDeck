@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('piHarness', {
  listDevices:async()=>[], onDeviceChanged:()=>()=>{},
  listSessions:async()=>[{...metadata,status:'Idle'}], listProjects:async()=>[{path:'project',name:'Project'}],
  onSessionsChanged:()=>()=>{}, onRuntimeEvent:()=>()=>{},
+ previewSession:async()=>null,
  openSession:async()=>{opens++;return {metadata,state:{sessionId:'pi',isStreaming:false,isCompacting:false,messageCount:1200,pendingMessageCount:0},messages,status:'Idle'};},
  listModels:async()=>[], listDeviceProfiles:async()=>[], getThinkingSettings:async()=>({level:'off',levels:['off']}), testOpenCount:()=>opens
 });

@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 import { isAbsolute, join, basename } from "node:path";
 import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import { HarnessSessionManager } from "../core/session-manager.js";
+import { sessionPreview } from "./session-preview.js";
 import { ExecutionController, type TaskIntent } from "../core/execution-controller.js";
 import type { ImageAttachment, PiRuntimeAdapter, RuntimeEvent } from "../runtime/types.js";
 import type { ExecutionStatus, SessionSnapshot, SessionSummary } from "./ipc-contract.js";
@@ -199,6 +200,11 @@ function registerIpc(): void {
     return { ...created, messages: [], status: "Idle" } satisfies SessionSnapshot;
   });
   ipcMain.handle("sessions:open", (_event, id: string) => openSnapshot(requireSession(id)));
+  ipcMain.handle("sessions:preview", (_event, id: string) => {
+    id = requireSession(id);
+    if (manager.runtime(id)) return null;
+    return sessionPreview(manager.list().find((session) => session.id === id)!);
+  });
   ipcMain.handle("sessions:rename", async (_event, id: string, name: string) => {
     await manager.renameSession(requireSession(id), requireText(name, "Session name", 120));
     publishSessions();

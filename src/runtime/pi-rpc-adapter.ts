@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { access } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import type {
   ContextUsage,
@@ -17,6 +18,7 @@ import { PiRpcTransport } from "./pi-rpc-transport.js";
 export interface PiRpcAdapterOptions {
   harnessSessionId: string;
   piSessionId: string;
+  piSessionFile?: string;
   projectDir: string;
   sessionDir: string;
   piPath?: string;
@@ -29,6 +31,8 @@ export interface PiRpcAdapterOptions {
 export class PiRpcAdapter implements PiRuntimeAdapter {
   readonly harnessSessionId: string;
   readonly #transport: PiRpcTransport;
+  readonly #sessionArgs: string[];
+  readonly #sessionFile: string | undefined;
   readonly #listeners = new Set<(event: RuntimeEvent) => void>();
   #sequence = 0;
   #activeRunId: string | undefined;
@@ -37,18 +41,21 @@ export class PiRpcAdapter implements PiRuntimeAdapter {
 
   constructor(options: PiRpcAdapterOptions) {
     this.harnessSessionId = options.harnessSessionId;
+    this.#sessionFile = options.piSessionFile;
+    const args = [
+      "--session-id", options.piSessionId,
+      "--session-dir", options.sessionDir,
+      "--offline",
+      ...(options.contextDir ? ["--extension", join(import.meta.dirname, "context-filter.js")] : []),
+      ...(options.extraArgs ?? []),
+    ];
+    this.#sessionArgs = args;
     this.#transport = new PiRpcTransport({
       ...(options.piPath ? { piPath: options.piPath } : {}),
       ...(options.piExecutableArgs ? { executableArgs: options.piExecutableArgs } : {}),
       cwd: options.projectDir,
       env: { ...options.piEnv, ...(options.contextDir ? { HARNESS_CONTEXT_DIR: options.contextDir } : {}) },
-      args: [
-        "--session-id", options.piSessionId,
-        "--session-dir", options.sessionDir,
-        "--offline",
-        ...(options.contextDir ? ["--extension", join(import.meta.dirname, "context-filter.js")] : []),
-        ...(options.extraArgs ?? []),
-      ],
+      args,
     });
   }
 
@@ -59,6 +66,16 @@ export class PiRpcAdapter implements PiRuntimeAdapter {
       this.#activeRunId = undefined;
     });
     try {
+      if (this.#sessionFile) {
+        try {
+          await access(this.#sessionFile);
+          // A known path avoids scanning every session header on each cold open.
+          this.#sessionArgs.splice(0, 2, "--session", this.#sessionFile);
+        } catch (error) {
+          // Older indexes and moved files still use Pi's ID-based discovery.
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        }
+      }
       await this.#transport.start();
       return this.getState();
     } catch (error) {

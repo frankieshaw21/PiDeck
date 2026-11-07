@@ -14,6 +14,8 @@ export interface SessionSummary extends HarnessSessionMetadata {
 }
 
 export interface SessionSnapshot {
+  draft?: boolean;
+  preview?: boolean;
   metadata: HarnessSessionMetadata;
   state: PiSessionState;
   messages: unknown[];
@@ -52,6 +54,7 @@ export interface DesktopApi {
   listSessions(): Promise<SessionSummary[]>;
   createSession(projectDir: string, name?: string): Promise<SessionSnapshot>;
   openSession(id: string): Promise<SessionSnapshot>;
+  previewSession(id: string): Promise<SessionSnapshot | null>;
   renameSession(id: string, name: string): Promise<void>;
   deleteSession(id: string): Promise<void>;
   prompt(id: string, message: string, intent: TaskIntent, images?: ImageAttachment[]): Promise<{ runId: string; taskId: string }>;

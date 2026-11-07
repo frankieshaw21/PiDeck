@@ -2,6 +2,24 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import { applyAssistantEnd, applyMessageUpdate, applyToolEvent, type ViewItem } from "./activity.js";
 
+test("indexed history preserves interleaved tool calls, results, and missing starts", () => {
+  const indexed: ViewItem[] = [], original: ViewItem[] = [];
+  const indexes = new Map<string, number>();
+  const records = [
+    { type: "tool_execution_start", toolCallId: "a", toolName: "read", args: { path: "a" } },
+    { type: "tool_execution_start", toolCallId: "b", toolName: "read", args: { path: "b" } },
+    { type: "tool_execution_end", toolCallId: "b", result: "B" },
+    { type: "tool_execution_end", toolCallId: "a", result: "A", isError: true },
+    { type: "tool_execution_end", toolCallId: "missing", result: "No start" },
+  ];
+  records.forEach((record, i) => {
+    for (const list of [indexed, original]) list.push({ key: `text-${i}`, kind: "assistant", text: "Text" });
+    applyToolEvent(indexed, record, i, indexes);
+    applyToolEvent(original, record, i);
+  });
+  assert.deepEqual(indexed, original);
+});
+
 test("completed assistant text appears even without stream deltas and reports failures", () => {
   const items: ViewItem[] = [{ key: "stream-1", kind: "assistant", text: "previous reply", streamIndex: 0 }];
   applyAssistantEnd(items, { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "Configured device." }] } }, 4, 3);

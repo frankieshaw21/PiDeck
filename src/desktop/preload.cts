@@ -26,6 +26,7 @@ const api: DesktopApi = {
   listSessions: () => ipcRenderer.invoke("sessions:list") as Promise<SessionSummary[]>,
   createSession: (projectDir, name) => ipcRenderer.invoke("sessions:create", projectDir, name),
   openSession: (id) => ipcRenderer.invoke("sessions:open", id),
+  previewSession: (id) => ipcRenderer.invoke("sessions:preview", id),
   renameSession: (id, name) => ipcRenderer.invoke("sessions:rename", id, name),
   deleteSession: (id) => ipcRenderer.invoke("sessions:delete", id),
   prompt: (id, message, intent, images) => ipcRenderer.invoke("runtime:prompt", id, message, intent, images),
