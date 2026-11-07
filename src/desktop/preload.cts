@@ -3,6 +3,19 @@ import type { DesktopApi, SessionSummary } from "./ipc-contract.js";
 import type { RuntimeEvent } from "../runtime/types.js";
 
 const api: DesktopApi = {
+  listDeviceProfiles: (id) => ipcRenderer.invoke("device-profiles:list", id),
+  saveDeviceProfile: (id, profile) => ipcRenderer.invoke("device-profiles:save", id, profile),
+  removeDeviceProfile: (id, profileId) => ipcRenderer.invoke("device-profiles:remove", id, profileId),
+  listDevices: () => ipcRenderer.invoke("devices:list"),
+  renameConnectedDevice: (id, name) => ipcRenderer.invoke("devices:rename", id, name),
+  connectDevice: (id, config) => ipcRenderer.invoke("devices:connect", id, config),
+  disconnectDevice: (id) => ipcRenderer.invoke("devices:disconnect", id),
+  deviceCommand: (id, command) => ipcRenderer.invoke("devices:command", id, command),
+  onDeviceChanged: (listener) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, state: Parameters<typeof listener>[0]) => listener(state);
+    ipcRenderer.on("devices:changed", wrapped);
+    return () => ipcRenderer.off("devices:changed", wrapped);
+  },
   listStoredAuth: () => ipcRenderer.invoke("auth:list-stored"),
   openAuthTerminal: () => ipcRenderer.invoke("auth:open-terminal"),
   openExternal: (url) => ipcRenderer.invoke("app:open-external", url),

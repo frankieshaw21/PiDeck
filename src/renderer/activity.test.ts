@@ -1,6 +1,33 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { applyToolEvent, type ViewItem } from "./activity.js";
+import { applyAssistantEnd, applyMessageUpdate, applyToolEvent, type ViewItem } from "./activity.js";
+
+test("completed assistant text appears even without stream deltas and reports failures", () => {
+  const items: ViewItem[] = [{ key: "stream-1", kind: "assistant", text: "previous reply", streamIndex: 0 }];
+  applyAssistantEnd(items, { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "Configured device." }] } }, 4, 3);
+  assert.deepEqual(items.map((item) => item.text), ["previous reply", "Configured device."]);
+  applyMessageUpdate(items, { type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "partial" } }, 6);
+  applyAssistantEnd(items, { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "complete" }] } }, 7, 5);
+  assert.equal(items.filter((item) => item.text === "complete").length, 1);
+  assert.ok(!items.some((item) => item.text === "partial"));
+  applyAssistantEnd(items, { type: "message_end", message: { role: "assistant", content: [], stopReason: "error", errorMessage: "Model unavailable" } }, 9, 8);
+  assert.equal(items.at(-1)?.text, "Model unavailable");
+});
+
+test("streams tool output into one running activity and replaces it on completion", () => {
+  const items: ViewItem[] = [];
+  applyToolEvent(items, { type: "tool_execution_start", toolCallId: "device", toolName: "device_exec", args: { command: "uptime" } }, 1);
+  applyToolEvent(items, { type: "tool_execution_update", toolCallId: "device", partialResult: "first chunk" }, 2);
+  assert.match(items[0]?.text ?? "", /^Running/);
+  applyToolEvent(items, { type: "tool_execution_update", toolCallId: "device", partialResult: "complete stream" }, 3);
+  assert.match(items[0]?.detail ?? "", /uptime/);
+  assert.doesNotMatch(items[0]?.detail ?? "", /first chunk/);
+  applyToolEvent(items, { type: "tool_execution_end", toolCallId: "device", toolName: "device_exec", result: "final output" }, 4);
+  assert.equal(items.length, 1);
+  assert.equal(items[0]?.text, "device_exec: uptime finished");
+  assert.doesNotMatch(items[0]?.detail ?? "", /complete stream/);
+  assert.match(items[0]?.detail ?? "", /final output/);
+});
 
 test("combines tool start and completion with their input and output", () => {
   const items: ViewItem[] = [];

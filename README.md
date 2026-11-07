@@ -24,6 +24,28 @@ supplies desktop interaction and explicit multi-session execution control.
 - Maximum two concurrent runs with an ordered eligibility queue
 - Cooperative single-writer lease per project (`Analyze` vs `May write`)
 - Session deletion kept separate from task cancellation
+- Session-scoped SSH devices with a shared persistent CLI or POSIX shell, live command
+  input/output, manual commands, and the Agent's `device_exec` tool
+
+## SSH devices
+
+Open a conversation and expand **SSH · Connect device / 连接设备** above the
+messages. Enter the address, port, username, and password, verify the host-key
+fingerprint, then connect. You can ask the Agent to inspect the attached device
+or submit commands manually in the same panel. The workspace's Connections tab
+summarizes devices across conversations. Live output is bounded and kept in memory.
+
+SSH sends each submitted command unchanged to the connected session, followed by Enter.
+The session waits for a recognized prompt ending in `>`, `#` or `$`. A returned
+prompt does not imply the command succeeded; inspect the output. A persistent
+shell retains its current mode and environment. Commands run one at a time and
+time out after 120 seconds. Interrupting a command disconnects the device.
+Passwords and live connections are not saved. Device names are stored locally
+per conversation. The login username defaults to `admin`.
+
+Prompt recognition is heuristic and may not work with every custom prompt.
+Telnet, interactive programs, paging, and full terminal emulation are not yet supported.
+Device output returned to the Agent can be sent to the selected model provider.
 
 ## Requirements
 

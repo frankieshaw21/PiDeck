@@ -7,7 +7,9 @@ import type { ContextUsage, ImageAttachment, RpcRecord, RuntimeEvent } from "../
 import { composeFileContext, parseFileContext, type FileContext } from "./file-context.js";
 import { lastModelUsage, modelUsage, type ModelUsage } from "./model-usage.js";
 import { MarkdownMessage } from "./markdown.js";
-import { applyMessageUpdate, applyToolEvent, groupMessages, groupTimeline, type ViewItem } from "./activity.js";
+import { DevicePanel } from "./device-panel.js";
+import type { DeviceState } from "../desktop/devices.js";
+import { applyAssistantEnd, applyMessageUpdate, applyToolEvent, groupMessages, groupTimeline, type ViewItem } from "./activity.js";
 import "./styles.css";
 import "./language.css";
 
@@ -55,6 +57,14 @@ function historyItems(messages: unknown[]): ViewItem[] {
 }
 
 function App() {
+  const [devices, setDevices] = useState<Record<string, DeviceState>>({});
+  useEffect(() => {
+    let active = true;
+    const apply = (state: DeviceState) => { if (active) setDevices((current) => ({ ...current, [state.sessionId]: state })); };
+    const unsubscribe = window.piHarness.onDeviceChanged(apply);
+    void window.piHarness.listDevices().then((states) => states.forEach(apply)).catch(() => {});
+    return () => { active = false; unsubscribe(); };
+  }, []);
   const [language, setLanguage] = useState<Language>(() => {
     const saved = localStorage.getItem("ui-language");
     return saved === "zh" || saved === "en" ? saved : navigator.language.toLowerCase().startsWith("zh") ? "zh" : "en";
@@ -133,6 +143,7 @@ function App() {
   const endRef = useRef<HTMLDivElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
   const followMessagesRef = useRef(true);
+  const assistantMessageStarts = useRef<Record<string, number>>({});
   const contextRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -212,6 +223,8 @@ function App() {
   function showError(value: unknown) { setError(value instanceof Error ? value.message : String(value)); }
 
   function handleEvent(event: RuntimeEvent) {
+    if (event.record.type === "message_start" && (event.record.message as { role?: string } | undefined)?.role === "assistant") assistantMessageStarts.current[event.harnessSessionId] = event.sequence;
+    const messageStart = assistantMessageStarts.current[event.harnessSessionId] ?? event.sequence;
     if (event.record.type === "message_end" && event.record.message && typeof event.record.message === "object" && (event.record.message as { role?: unknown }).role === "assistant") {
       const usage = modelUsage(event.record.message);
       setModelUsages((current) => ({ ...current, [event.harnessSessionId]: usage }));
@@ -237,7 +250,9 @@ function App() {
       const list = [...(current[event.harnessSessionId] ?? [])];
       if (event.record.type === "message_update") {
         applyMessageUpdate(list, event.record, event.sequence);
-      } else if (event.record.type === "tool_execution_start" || event.record.type === "tool_execution_end") {
+      } else if (event.record.type === "message_end") {
+        applyAssistantEnd(list, event.record, event.sequence, messageStart);
+      } else if (event.record.type === "tool_execution_start" || event.record.type === "tool_execution_update" || event.record.type === "tool_execution_end") {
         applyToolEvent(list, event.record, event.sequence);
       } else if (event.record.type === "auto_retry_start") {
         list.push({ key: `event-${event.sequence}`, kind: "notice", text: "Pi is retrying the request…" });
@@ -476,7 +491,7 @@ function App() {
     </div></div>}
     <section className="chat">
       {workspace ? <div className="workspace-page"><h1>{t.workspace}</h1><p>{t.workspaceDescription}</p><div className="workspace-tabs">{(["connections", "skills", "knowledge", "instructions", "extensions"] as const).map((tab) => <button key={tab} className={workspaceTab === tab ? "workspace-tab active" : "workspace-tab"} onClick={() => setWorkspaceTab(tab)}>{tab === "extensions" ? (language === "zh" ? "扩展" : "Extensions") : t[tab]}</button>)}</div>
-        {workspaceTab === "extensions" ? <div className="workspace-empty extensions-panel">
+        {workspaceTab === "connections" ? <div className="workspace-empty"><h2>{language === "zh" ? "设备连接" : "Device connections"}</h2><p>{language === "zh" ? "在对话中连接 SSH 设备，查看状态及 Agent 与设备的输入输出。" : "Connect SSH devices inside conversations and inspect their status and activity."}</p>{sessions.filter((session) => devices[session.id]).map((session) => <div className="workspace-row" key={session.id}><strong>{session.name}</strong><DevicePanel id={session.id} state={devices[session.id]} zh={language === "zh"} agentBusy={["Running", "Queued", "WaitingForUser", "Stopping"].includes(session.status)} /></div>)}{!sessions.some((session) => devices[session.id]) && <p>{language === "zh" ? "尚未连接设备。打开一个对话，点击顶部的「连接设备」开始。" : "No devices yet. Open a conversation and select Connect device."}</p>}</div> : workspaceTab === "extensions" ? <div className="workspace-empty extensions-panel">
           <div className="extensions-heading"><h2>{language === "zh" ? "扩展" : "Extensions"}</h2><div><button disabled={extensionBusy} onClick={() => setShowNetworkInstall((open) => !open)}>{language === "zh" ? "网络添加" : "Add from network"}</button><button disabled={extensionBusy} onClick={() => void changeExtensions(() => window.piHarness.addExtension("file"))}>{language === "zh" ? "添加文件" : "Add file"}</button><button disabled={extensionBusy} onClick={() => void changeExtensions(() => window.piHarness.addExtension("directory"))}>{language === "zh" ? "添加文件夹" : "Add folder"}</button></div></div>
           <p>{language === "zh" ? "扩展会运行代码，请仅添加可信来源。此处管理通过本应用添加的本地扩展，原文件保留在原位置。新会话使用最新设置；已打开的会话需重启应用后生效。" : "Extensions run code; add only sources you trust. Manage local extensions added here; source files stay in place. New sessions use the latest settings; restart the app to apply changes to open sessions."}</p>
           {showNetworkInstall && <form className="network-extension" onSubmit={(event) => { event.preventDefault(); const source = networkSource.trim(); if (!source) return; void changeExtensions(async () => { const result = await window.piHarness.addNetworkExtension(source); setNetworkSource(""); setShowNetworkInstall(false); return result; }); }}>
@@ -488,7 +503,7 @@ function App() {
           {!extensions.length && <p>{language === "zh" ? "还没有添加扩展。" : "No extensions added yet."}</p>}
           {extensions.map((item) => <div className="workspace-row extension-row" key={item.path}><div><strong>{item.name}</strong><small title={item.path}>{item.path}</small><small>{item.enabled ? (language === "zh" ? "已启用" : "Enabled") : (language === "zh" ? "已停用" : "Disabled")}</small></div><div className="extension-actions"><button disabled={extensionBusy} onClick={() => void changeExtensions(() => window.piHarness.setExtensionEnabled(item.path, !item.enabled))}>{item.enabled ? (language === "zh" ? "停用" : "Disable") : (language === "zh" ? "启用" : "Enable")}</button><button disabled={extensionBusy} onClick={() => { if (window.confirm(language === "zh" ? `移除扩展“${item.name}”？${item.managedRoot ? "应用下载的文件将被删除。" : "原文件不会被删除。"}` : `Remove “${item.name}”? ${item.managedRoot ? "The downloaded files will be deleted." : "Source files will not be deleted."}`)) void changeExtensions(() => window.piHarness.removeExtension(item.path)); }}>{language === "zh" ? "移除" : "Remove"}</button></div></div>)}
         </div> : !selected ? <div className="workspace-empty">{language === "zh" ? "请先打开一个会话以查看工作台。" : "Open a session to inspect its workspace."}</div> : discoveryError ? <div className="workspace-empty">{discoveryError}</div> : !discovery ? <div className="workspace-empty">{language === "zh" ? "正在读取…" : "Loading…"}</div> : <div className="workspace-empty">
-          {workspaceTab === "connections" && <><h2>{t.connections}</h2><p>{language === "zh" ? "仅显示配置文件中的条目；连接状态和项目授权未验证，扩展注册的连接不在此列。" : "Entries from configuration files only; connection and project trust are not verified. Extension-registered servers are not listed."}</p>{discovery.connections.length ? discovery.connections.map((item, i) => <div className="workspace-row" key={`${item.path}-${i}`}><strong>{item.name}</strong><small>{item.scope === "global" ? (language === "zh" ? "全局" : "Global") : (language === "zh" ? "项目" : "Project")} · {language === "zh" ? "已配置，状态未知" : "Configured, status unknown"}</small><small>{item.path}</small></div>) : <p>{language === "zh" ? "默认配置文件中没有发现连接。" : "No connections found in the default configuration files."}</p>}</>}
+
           {workspaceTab === "skills" && <><h2>{t.skills}</h2><p>{language === "zh" ? "来自当前会话的技能命令；来源路径未由运行时提供。" : "Skill commands reported by this session; source paths are not provided by the runtime."}</p>{discovery.skillError ? <p>{discovery.skillError}</p> : discovery.skills?.length ? discovery.skills.map((item, i) => <div className="workspace-row" key={`${item.name}-${i}`}><strong>{item.name}</strong>{item.description && <small>{item.description}</small>}</div>) : <p>{language === "zh" ? "当前会话没有报告技能命令。" : "No skill commands reported by this session."}</p>}</>}
           {workspaceTab === "instructions" && <><h2>{t.instructions}</h2><p>{language === "zh" ? "发现的指令文件；是否已加载取决于运行时状态。" : "Discovered instruction files; actual loading depends on runtime state."}</p>{discovery.instructions.length ? discovery.instructions.map((item) => <div className="workspace-row" key={item.path}><strong>{item.name}</strong><small>{item.path}</small></div>) : <p>{language === "zh" ? "没有发现指令文件。" : "No instruction files found."}</p>}</>}
           {workspaceTab === "knowledge" && <><h2>{t.knowledge}</h2><p>{language === "zh" ? "知识库尚未接入。" : "Knowledge management is not available yet."}</p></>}
@@ -507,6 +522,7 @@ function App() {
             {Object.values(extensionStatus[selected.metadata.id] ?? {}).filter(Boolean).map((text, index) => <small key={index}>{text}</small>)}
           </div>
         </header>
+        <DevicePanel key={selected.metadata.id} id={selected.metadata.id} state={devices[selected.metadata.id]} zh={language === "zh"} agentBusy={Boolean(running)} />
         <div className="messages" ref={messagesRef} onScroll={(event) => { const element = event.currentTarget; followMessagesRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 48; }}>
           {currentItems.length === 0 && <div className="empty"><span>π</span><h2>{t.start}</h2><p>{t.empty}</p></div>}
           {groupMessages(currentItems).map((group) => group.kind === "single" ? group.items.map((item) => <article key={item.key} className={`message ${item.kind}`}>{item.kind === "notice" && <div className="label">{t.notice}</div>}{item.images?.length ? <div className="message-images">{item.images.map((image, index) => <img key={index} src={`data:${image.mimeType};base64,${image.data}`} alt={language === "zh" ? "附加图片" : "Attached image"} />)}</div> : null}{item.files?.map((file, index) => <details className="file-attachment" key={`${file.name}-${index}`}><summary>📄 {file.name}</summary><pre>{file.content}</pre></details>)}<MarkdownMessage text={item.kind === "notice" && item.text === "Pi is retrying the request…" ? t.retry : item.text} />{item.delivery && <div className="delivery-status" role="status">{item.delivery === "pending" ? (selectedSummary?.status === "Queued" ? (language === "zh" ? "排队中，尚未发送" : "Queued, not sent yet") : (language === "zh" ? "正在发送…" : "Sending…")) : <>{item.delivery === "cancelled" ? (language === "zh" ? "已取消，未发送" : "Cancelled, not sent") : (language === "zh" ? "发送失败" : "Send failed")}{item.deliveryError && <span> · {item.deliveryError}</span>} <button onClick={() => { if ((draft || images.length || files.length) && !window.confirm(language === "zh" ? "恢复此消息会替换当前草稿，继续吗？" : "Restore this message and replace the current draft?")) return; updateComposer(selected.metadata.id, () => ({ draft: item.text, images: item.images ?? [], files: item.files ?? [] })); setItems((current) => ({ ...current, [selected.metadata.id]: (current[selected.metadata.id] ?? []).filter((entry) => entry.key !== item.key) })); }}>{language === "zh" ? "恢复到输入框" : "Restore to composer"}</button></>}</div>}</article>) : <article key={group.key} className="message assistant">

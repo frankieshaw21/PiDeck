@@ -10,6 +10,11 @@ function format(value: unknown): string {
 }
 
 export function applyToolEvent(list: ViewItem[], record: RpcRecord, sequence: number): void {
+  if (record.type === "tool_execution_update") {
+    const item = list.find((row) => row.key === `tool-${record.toolCallId}`);
+    if (item) item.detail = (item.detail?.split("\n\nOutput:\n")[0] ?? "") + "\n\nOutput:\n" + format(record.partialResult);
+    return;
+  }
   const id = typeof record.toolCallId === "string" ? record.toolCallId : undefined;
   const name = String(record.toolName ?? record.name ?? "tool");
   const key = id ? `tool-${id}` : `event-${sequence}`;
@@ -22,7 +27,7 @@ export function applyToolEvent(list: ViewItem[], record: RpcRecord, sequence: nu
   const target = input?.command ?? input?.path ?? input?.file_path ?? input?.pattern ?? input?.query;
   const action = previous?.text.replace(/^(Running )/, "").replace(/(…| finished| failed)$/, "") ?? `${name}${typeof target === "string" && target ? `: ${target.replace(/\s+/g, " ").slice(0, 120)}` : ""}`;
   const item: ViewItem = { key, kind: "tool", text: record.type === "tool_execution_start" ? `Running ${action}…` : record.isError ? `${action} failed` : `${action} finished`, detail: detail || previous?.detail || "" };
-  if (previous && result && !args && previous.detail) item.detail = `${previous.detail}\n\nOutput:\n${result}`;
+  if (previous && result && !args && previous.detail) item.detail = `${previous.detail.split("\n\nOutput:\n")[0]}\n\nOutput:\n${result}`;
   if (index >= 0) list[index] = item; else list.push(item);
 }
 
@@ -52,6 +57,22 @@ export function applyMessageUpdate(list: ViewItem[], record: RpcRecord, sequence
     type.endsWith("_delta") && typeof update.delta === "string" ? previous.text + update.delta : previous.text;
   if (type.endsWith("_end") && !text) list.splice(index, 1);
   else list[index] = { ...previous, text, streaming: !type.endsWith("_end") };
+}
+
+// Some providers only deliver final text, or omit the last streaming update.
+// Reconcile against the authoritative completed message within this message's
+// sequence range so previous replies and tool activity cannot be overwritten.
+export function applyAssistantEnd(list: ViewItem[], record: RpcRecord, sequence: number, startSequence: number): void {
+  const message = record.message as Record<string, unknown> | undefined;
+  if (record.type !== "message_end" || message?.role !== "assistant") return;
+  const content = typeof message.content === "string" ? [{ type: "text", text: message.content }] : Array.isArray(message.content) ? message.content : [];
+  content.forEach((part, contentIndex) => {
+    if (!part || part.type !== "text" || typeof part.text !== "string" || !part.text) return;
+    const index = list.findIndex((item) => item.kind === "assistant" && item.streamIndex === contentIndex && item.key.startsWith("stream-") && Number(item.key.slice(7)) >= startSequence);
+    if (index >= 0) list[index] = { ...list[index]!, text: part.text, streaming: false };
+    else list.push({ key: `final-${sequence}-${contentIndex}`, kind: "assistant", text: part.text });
+  });
+  if (message.stopReason === "error" || message.stopReason === "aborted") list.push({ key: `error-${sequence}`, kind: "notice", text: typeof message.errorMessage === "string" && message.errorMessage ? message.errorMessage : "Agent response interrupted." });
 }
 
 export type MessageGroup = { key: string; kind: "turn" | "single"; items: ViewItem[] };

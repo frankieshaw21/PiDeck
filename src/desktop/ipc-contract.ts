@@ -1,5 +1,7 @@
 import type { ContextItem } from "./context-management.js";
 import type { ManagedExtension } from "./extensions.js";
+import type { DeviceConfig, DeviceState } from "./devices.js";
+import type { DeviceProfile } from "./device-profiles.js";
 import type { HarnessSessionMetadata } from "../core/session-manager.js";
 import type { TaskIntent } from "../core/execution-controller.js";
 import type { ContextUsage, ExtensionUiResponse, ImageAttachment, PiSessionState, RuntimeEvent } from "../runtime/types.js";
@@ -31,6 +33,15 @@ export interface WorkspaceDiscovery {
 export interface ProjectSummary { path: string; name: string }
 
 export interface DesktopApi {
+  listDeviceProfiles(id: string): Promise<DeviceProfile[]>;
+  saveDeviceProfile(id: string, profile: Omit<DeviceProfile, "id" | "sessionId"> & { id?: string }): Promise<DeviceProfile>;
+  removeDeviceProfile(id: string, profileId: string): Promise<void>;
+  listDevices(): Promise<DeviceState[]>;
+  renameConnectedDevice(id: string, name: string): Promise<void>;
+  connectDevice(id: string, config: DeviceConfig): Promise<void>;
+  disconnectDevice(id: string): Promise<void>;
+  deviceCommand(id: string, command: string): Promise<void>;
+  onDeviceChanged(listener: (state: DeviceState) => void): () => void;
   listStoredAuth(): Promise<string[]>;
   openAuthTerminal(): Promise<void>;
   openExternal(url: string): Promise<void>;

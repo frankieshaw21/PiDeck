@@ -12,12 +12,17 @@ import { ContextStore, activeBranch, listContextItems, roundEntryIds, type Conte
 import { ExtensionStore } from "./extensions.js";
 import { discoverWorkspace } from "./workspace-discovery.js";
 import { resolvePiCommand } from "./pi-command.js";
+import { DeviceBroker } from "./devices.js";
+import { DeviceProfileStore } from "./device-profiles.js";
+import { PiRpcAdapter } from "../runtime/pi-rpc-adapter.js";
 
 let window: BrowserWindow | undefined;
 let manager: HarnessSessionManager;
 let execution: ExecutionController;
 let extensions: ExtensionStore;
 let contextStore: ContextStore;
+let devices: DeviceBroker;
+let deviceProfiles: DeviceProfileStore;
 let quitting = false;
 const statuses = new Map<string, ExecutionStatus>();
 const contextUpdating = new Set<string>();
@@ -88,6 +93,22 @@ async function openSnapshot(id: string): Promise<SessionSnapshot> {
 }
 
 function registerIpc(): void {
+  ipcMain.handle("device-profiles:list", (_event, id) => deviceProfiles.list(requireSession(id)));
+  ipcMain.handle("device-profiles:save", (_event, id, profile) => deviceProfiles.save(requireSession(id), profile));
+  ipcMain.handle("device-profiles:remove", (_event, id, profileId) => deviceProfiles.remove(requireSession(id), profileId));
+  ipcMain.handle("devices:list", () => devices.list());
+  ipcMain.handle("devices:rename", (_event, id, name) => { id = requireSession(id); if (execution.has(id)) throw new Error("Wait for the Agent to finish before renaming the device"); devices.rename(id, name); });
+  ipcMain.handle("devices:connect", async (_event, id, config) => {
+    id = requireSession(id);
+    if (execution.has(id)) throw new Error("Wait for the Agent to finish before changing devices");
+    await devices.connect(id, config);
+  });
+  ipcMain.handle("devices:disconnect", (_event, id) => devices.disconnect(requireSession(id)));
+  ipcMain.handle("devices:command", async (_event, id, command) => {
+    id = requireSession(id);
+    if (execution.has(id)) throw new Error("Wait for the Agent to finish before manual input");
+    await devices.run(id, command, "user");
+  });
   ipcMain.handle("auth:list-stored", async () => {
     const authPath = join(process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent"), "auth.json");
     let raw: string;
@@ -179,13 +200,16 @@ function registerIpc(): void {
     subscriptions.delete(id);
     statuses.delete(id);
     const piSessionId = manager.list().find((session) => session.id === id)!.piSessionId;
+    devices.remove(id);
     await manager.deleteSession(id);
+    await deviceProfiles.removeSession(id);
     await contextStore.remove(piSessionId);
     publishSessions();
   });
   ipcMain.handle("runtime:prompt", async (_event, id: string, message: string, intent: TaskIntent, images?: ImageAttachment[]) => {
     id = requireSession(id);
     if (contextUpdating.has(id)) throw new Error("Context update is in progress");
+    if (devices.list().some((device) => device.sessionId === id && (device.busy || device.status === "connecting"))) throw new Error("Wait for the device connection or manual command to finish");
     if (typeof message !== "string" || message.length > 2_000_000) throw new Error("Invalid prompt");
     message = message.trim();
     if (images !== undefined && (!Array.isArray(images) || images.length > 4 || images.some((image) => !image || image.type !== "image" || !["image/png", "image/jpeg", "image/gif", "image/webp"].includes(image.mimeType) || typeof image.data !== "string" || image.data.length > 13_981_016 || (!image.data.length || image.data.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(image.data))))) throw new Error("Invalid images");
@@ -367,6 +391,20 @@ async function createWindow(): Promise<void> {
 }
 
 app.whenReady().then(async () => {
+  deviceProfiles = new DeviceProfileStore(join(app.getPath("userData"), "harness-state", "device-profiles.json"));
+  await deviceProfiles.load();
+  const trustedHosts = new Map<string, string>();
+  devices = new DeviceBroker((state) => window?.webContents.send("devices:changed", state), async (host, fingerprint) => {
+    if (trustedHosts.get(host) === fingerprint) return true;
+    const result = await dialog.showMessageBox(window!, {
+      type: "question", message: `SSH 主机验证 / Verify SSH host: ${host}`,
+      detail: `${trustedHosts.has(host) ? "主机密钥已变更 / Host key changed\n" : ""}${fingerprint}\n请核对设备指纹后连接。 / Verify this fingerprint with your device.`,
+      buttons: ["取消 / Cancel", "信任并连接 / Trust and connect"], defaultId: 0, cancelId: 0, noLink: true,
+    });
+    if (result.response !== 1) return false;
+    trustedHosts.set(host, fingerprint); return true;
+  });
+  await devices.start();
   contextStore = new ContextStore(join(app.getPath("userData"), "harness-state", "context-edits"));
   extensions = new ExtensionStore(join(app.getPath("userData"), "harness-state", "extensions.json"));
   await extensions.load();
@@ -377,6 +415,10 @@ app.whenReady().then(async () => {
     piExecutableArgs: pi.args,
     ...(pi.env ? { piEnv: pi.env } : {}),
     extensionPaths: () => extensions.enabledPaths(),
+    adapterFactory: (options) => new PiRpcAdapter({ ...options,
+      piEnv: { ...options.piEnv, ...devices.environment(options.harnessSessionId) },
+      extraArgs: [...(options.extraArgs ?? []), "--extension", join(import.meta.dirname, "../runtime/device-tools.js")],
+    }),
   });
   execution = new ExecutionController({
     maxConcurrent: 2,
@@ -428,6 +470,7 @@ app.on("before-quit", (event) => {
       .map((session) => manager.runtime(session.id)?.abort());
     await Promise.allSettled(running);
     await manager.dispose();
+    devices.dispose();
     app.quit();
   })();
 });
