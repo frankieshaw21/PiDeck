@@ -112,7 +112,34 @@ function registerIpc(): void {
     await shell.openExternal(url.href);
   });
   ipcMain.handle("project:choose", async () => {
-    const result = await dialog.showOpenDialog(window!, { properties: ["openDirectory", "createDirectory"] });
+    let defaultPath: string | undefined;
+    if (process.platform === "win32") {
+      try {
+        const { stdout } = await promisify(execFile)("reg.exe", ["query", "HKCU\\Network", "/s"]);
+        const mappings: Array<{ drive: string; path: string }> = [];
+        let drive = "";
+        for (const line of stdout.split(/\r?\n/)) {
+          const key = line.match(/^HKEY_CURRENT_USER\\Network\\([A-Za-z])\s*$/i);
+          if (key?.[1]) drive = key[1].toUpperCase();
+          const remote = line.match(/^\s*RemotePath\s+REG_\w+\s+(\\\\.+?)\s*$/i);
+          if (drive && remote?.[1]) mappings.push({ drive, path: remote[1] });
+        }
+        if (mappings.length) {
+          const choice = await dialog.showMessageBox(window!, {
+            type: "question",
+            message: "Choose a location / 选择位置",
+            detail: "Mapped network drives are opened using their network paths. / 映射的网络驱动器将通过网络路径打开。",
+            buttons: ["Other location / 其他位置", ...mappings.map((mapping) => `${mapping.drive}:  ${mapping.path}`), "Cancel / 取消"],
+            defaultId: 0,
+            cancelId: mappings.length + 1,
+            noLink: true,
+          });
+          if (choice.response === mappings.length + 1) return null;
+          if (choice.response > 0) defaultPath = mappings[choice.response - 1]?.path;
+        }
+      } catch { /* No saved mappings or registry access unavailable. */ }
+    }
+    const result = await dialog.showOpenDialog(window!, { properties: ["openDirectory", "createDirectory"], ...(defaultPath ? { defaultPath } : {}) });
     const selected = result.canceled ? undefined : result.filePaths[0];
     if (selected) { if (!authorizedProjects.has(selected)) authorizedProjects.set(selected, basename(selected) || selected); await saveProjects(); }
     return selected ?? null;
