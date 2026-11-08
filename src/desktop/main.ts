@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import { externalSkillPaths, skillsRoot } from "./bundled-plugins.js";
 import { stat, readFile, writeFile, mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { execFile } from "node:child_process";
@@ -108,6 +110,9 @@ function registerIpc(): void {
   ipcMain.handle("device-profiles:save", (_event, id, profile) => deviceProfiles.save(requireSession(id), profile));
   ipcMain.handle("device-profiles:remove", (_event, id, profileId) => deviceProfiles.remove(requireSession(id), profileId));
   ipcMain.handle("devices:list", () => devices.list());
+  ipcMain.handle("devices:list-session", (_event, id) => devices.listSessionDevices(requireSession(id)));
+  ipcMain.handle("devices:add-session", async (_event, id, config) => { id = requireSession(id); if (execution.has(id)) throw new Error("Wait for the Agent to finish before changing devices"); await devices.addSessionDevice(id, config); });
+  ipcMain.handle("devices:remove-session", (_event, id, alias) => { id = requireSession(id); if (execution.has(id)) throw new Error("Wait for the Agent to finish before changing devices"); if (typeof alias !== "string") throw new Error("Invalid device alias"); devices.removeSessionDevice(id, alias); });
   ipcMain.handle("devices:rename", (_event, id, name) => { id = requireSession(id); if (execution.has(id)) throw new Error("Wait for the Agent to finish before renaming the device"); devices.rename(id, name); });
   ipcMain.handle("devices:connect", async (_event, id, config) => {
     id = requireSession(id);
@@ -347,10 +352,11 @@ function registerIpc(): void {
   ipcMain.handle("workspace:discover", async (_event, id: string) => {
     id = requireSession(id);
     const metadata = manager.list().find((session) => session.id === id)!;
-    const discovery = discoverWorkspace(metadata.projectDir, process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent"));
+    const discovery = discoverWorkspace(metadata.projectDir, process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent"), externalSkillPaths());
     const commands = manager.runtime(id)?.getCommands();
     // Start the runtime query alongside filesystem discovery.
     const [result, skills] = await Promise.all([discovery, commands?.then((value) => ({ value }), (error: unknown) => ({ error }))]);
+    if (!existsSync(join(skillsRoot(), "package.json"))) result.warnings.push({ path: skillsRoot(), message: "独立 skill 包不存在，相关技能未加载。 / External skill package not found; its skills were not loaded." });
     try {
       if (!skills) throw new Error("Session runtime is not open");
       if ("error" in skills) throw skills.error;
@@ -455,7 +461,7 @@ app.whenReady().then(async () => {
     extensionPaths: () => extensions.enabledPaths(),
     adapterFactory: (options) => new PiRpcAdapter({ ...options,
       piEnv: { ...options.piEnv, ...devices.environment(options.harnessSessionId) },
-      extraArgs: [...(options.extraArgs ?? []), "--extension", join(import.meta.dirname, "../runtime/device-tools.js")],
+      extraArgs: [...(options.extraArgs ?? []), "--extension", join(import.meta.dirname, "../runtime/device-tools.js"), ...(existsSync(join(skillsRoot(), "package.json")) ? ["--extension", skillsRoot()] : [])],
     }),
   });
   execution = new ExecutionController({

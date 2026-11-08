@@ -39,6 +39,9 @@ export interface DesktopApi {
   saveDeviceProfile(id: string, profile: Omit<DeviceProfile, "id" | "sessionId"> & { id?: string }): Promise<DeviceProfile>;
   removeDeviceProfile(id: string, profileId: string): Promise<void>;
   listDevices(): Promise<DeviceState[]>;
+  listConversationDevices(id: string): Promise<Array<{ alias: string; connectionId: string; name: string; host: string; port: number; username: string; protocol: "ssh" | "telnet"; status: DeviceState["status"]; prompt?: string }>>;
+  addConversationDevice(id: string, config: DeviceConfig): Promise<void>;
+  removeConversationDevice(id: string, alias: string): Promise<void>;
   renameConnectedDevice(id: string, name: string): Promise<void>;
   connectDevice(id: string, config: DeviceConfig): Promise<void>;
   disconnectDevice(id: string): Promise<void>;

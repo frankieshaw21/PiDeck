@@ -1,8 +1,25 @@
-import { readFile, stat } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { loadSkills } from "@earendil-works/pi-coding-agent";
+import { access, readFile, stat } from "node:fs/promises";
+import { constants } from "node:fs";
+import { delimiter, dirname, join } from "node:path";
 import type { WorkspaceDiscovery } from "./ipc-contract.js";
 
-export async function discoverWorkspace(project: string, agentDir: string): Promise<WorkspaceDiscovery> {
+/** Check the actual application PATH without launching or installing a program. */
+export async function executableAvailable(name: string, pathValue = process.env.PATH ?? ""): Promise<boolean> {
+  const extensions = process.platform === "win32" ? (process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";") : [""];
+  for (const dir of pathValue.split(delimiter).filter(Boolean)) {
+    for (const extension of extensions) {
+      try {
+        const candidate = join(dir, name + extension);
+        await access(candidate, process.platform === "win32" ? constants.F_OK : constants.X_OK);
+        if ((await stat(candidate)).isFile()) return true;
+      } catch { /* Continue searching PATH. */ }
+    }
+  }
+  return false;
+}
+
+export async function discoverWorkspace(project: string, agentDir: string, bundledSkillPaths: string[] = []): Promise<WorkspaceDiscovery> {
   const result: WorkspaceDiscovery = { connections: [], instructions: [], warnings: [] };
   for (const [scope, path] of [["global", join(agentDir, "mcp.json")], ["project", join(project, ".pi", "mcp.json")]] as const) {
     try {
@@ -36,6 +53,18 @@ export async function discoverWorkspace(project: string, agentDir: string): Prom
   for (const discovery of discoveries) {
     result.instructions.push(...discovery.instructions);
     result.warnings.push(...discovery.warnings);
+  }
+  if (bundledSkillPaths.length) {
+    if (!(await Promise.all(bundledSkillPaths.map(async (path) => { try { return (await stat(path)).isFile(); } catch { return false; } }))).every(Boolean)) result.warnings.push({ path: "HARNESS_SKILLS_DIR", message: "独立 skill 目录缺失或不完整；请配置 HARNESS_SKILLS_DIR。 / External skill resources are missing or incomplete." });
+    // Detect same-name default skills. Bundled skills load via the CLI package,
+    // which has precedence; report the conflict without changing user files.
+    const discovered = loadSkills({ cwd: project, agentDir, skillPaths: bundledSkillPaths, includeDefaults: true });
+    for (const diagnostic of discovered.diagnostics) {
+      const collision = diagnostic.collision;
+      if (diagnostic.type === "collision" && collision?.resourceType === "skill" && bundledSkillPaths.includes(collision.loserPath)) {
+        result.warnings.push({ path: collision.loserPath, message: `Skill 名称冲突 / Skill name collision: ${collision.name}. Harness loads the bundled plugin first; the other skill is ${collision.winnerPath}.` });
+      }
+    }
   }
   return result;
 }

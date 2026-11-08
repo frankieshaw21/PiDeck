@@ -24,8 +24,21 @@ supplies desktop interaction and explicit multi-session execution control.
 - Maximum two concurrent runs with an ordered eligibility queue
 - Cooperative single-writer lease per project (`Analyze` vs `May write`)
 - Session deletion kept separate from task cancellation
-- Session-scoped SSH devices with a shared persistent CLI or POSIX shell, live command
+- Session-scoped SSH or Telnet devices with a shared persistent CLI or POSIX shell, live command
   input/output, manual commands, and the Agent's `device_exec` tool
+
+## External skills
+
+Skill files and reference material are managed separately from this application.
+By default, Harness loads the Pi skill package from `~/.pi/harness-skills`.
+Set `HARNESS_SKILLS_DIR` to the absolute path of another skill package before
+starting Harness. The directory must contain the package `package.json` and its
+skill files. Harness can start without the directory, but the external skills
+will be unavailable. The skill package is not included in application release
+builds and must be distributed separately.
+
+Domain-specific tools, extensions, and skills are managed separately and are not
+part of Harness. They must be installed through Pi if needed.
 
 ## Responsiveness
 
@@ -63,7 +76,7 @@ preserving existing execution behavior. **Analyze / 分析** changes scheduling
 intent; it is not a filesystem permission boundary.
 
 Prompt recognition is heuristic and may not work with every custom prompt.
-Telnet, interactive programs, paging, and full terminal emulation are not yet supported.
+Telnet connections to console servers are supported; local serial ports, interactive programs, paging, and full terminal emulation are not yet supported. Telnet transmits credentials and commands without encryption.
 Device output returned to the Agent can be sent to the selected model provider.
 
 ## Requirements

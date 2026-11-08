@@ -15,15 +15,15 @@ import type { RpcRecord } from "../runtime/types.js";
 
 const shellPath = process.platform === "win32" ? "C:/Program Files/Git/bin/bash.exe" : "/bin/sh";
 test("recognizes operational and configuration prompts but not echoed commands", () => {
-  assert.equal(cliPrompt("\x1b[Jadmin@PICOS> "), "admin@PICOS>");
-  assert.equal(cliPrompt("[edit]\r\nadmin@PICOS# "), "admin@PICOS#");
-  assert.equal(cliPrompt("admin@PICOS(config)# "), "admin@PICOS(config)#");
+  assert.equal(cliPrompt("\x1b[Jadmin@DEVICE> "), "admin@DEVICE>");
+  assert.equal(cliPrompt("[edit]\r\nadmin@DEVICE# "), "admin@DEVICE#");
+  assert.equal(cliPrompt("admin@DEVICE(config)# "), "admin@DEVICE(config)#");
   assert.equal(cliPrompt("$ "), "$");
-  assert.equal(cliPrompt("admin@PICOS> configure"), undefined);
+  assert.equal(cliPrompt("admin@DEVICE> configure"), undefined);
 });
 
-test("PICOS CLI sends exact commands, preserves config mode and lets Pi reply", { timeout: 30000 }, async () => {
-  const root = await mkdtemp(join(tmpdir(), "pideck-picos-test-"));
+test("DEVICE CLI sends exact commands, preserves config mode and lets Pi reply", { timeout: 30000 }, async () => {
+  const root = await mkdtemp(join(tmpdir(), "pideck-device-test-"));
   const connections = new Set<Connection>();
   const wire: string[] = [];
   const states: DeviceState[] = [];
@@ -35,7 +35,7 @@ test("PICOS CLI sends exact commands, preserves config mode and lets Pi reply", 
       const session = accept(); session.on("pty", (acceptPty) => acceptPty?.());
       session.on("shell", (acceptShell) => {
         const channel = acceptShell(); let configMode = false;
-        channel.write("\x1b[Jadmin@PICOS> ");
+        channel.write("\x1b[Jadmin@DEVICE> ");
         channel.on("data", (chunk: Buffer) => {
           const value = chunk.toString(); wire.push(value);
           const command = value.replace(/\r$/, "");
@@ -46,7 +46,7 @@ test("PICOS CLI sends exact commands, preserves config mode and lets Pi reply", 
             if (command === "configure") { configMode = true; channel.write("Entering configuration mode\r\n[edit]\r\n"); }
             else if (command === "observe") channel.write(`mode=${configMode ? "configuration" : "operational"}\r\n`);
             else channel.write("unknown command.\r\n");
-            channel.write(configMode ? "admin@PICOS# " : "admin@PICOS> ");
+            channel.write(configMode ? "admin@DEVICE# " : "admin@DEVICE> ");
           }, command.length * 3 + 30));
         });
       });
@@ -58,14 +58,14 @@ test("PICOS CLI sends exact commands, preserves config mode and lets Pi reply", 
     server.listen(0, "127.0.0.1"); await once(server, "listening");
     const address = server.address(); assert.ok(address && typeof address !== "string");
     await broker.start();
-    await broker.connect("picos", { host: "127.0.0.1", port: address.port, username: "admin", password: "test", name: "核心交换机" });
-    const result = await broker.run("picos", "configure", "user");
-    assert.deepEqual(result, { prompt: "admin@PICOS#" });
+    await broker.connect("device", { host: "127.0.0.1", port: address.port, username: "admin", password: "test", name: "核心交换机" });
+    const result = await broker.run("device", "configure", "user");
+    assert.deepEqual(result, { prompt: "admin@DEVICE#" });
     assert.deepEqual(wire, ["configure\r"]);
     assert.ok(states.at(-1)!.logs.some((log) => log.kind === "output" && log.text.includes("configure\r\nEntering")));
     assert.ok(states.at(-1)!.logs.length < 10, "One character must not produce a new log row");
-    await assert.rejects(broker.run("picos", "configure\nshow version", "user"), /one command/);
-    const env = broker.environment("picos");
+    await assert.rejects(broker.run("device", "configure\nshow version", "user"), /one command/);
+    const env = broker.environment("device");
     const statusUrl = new URL(env.HARNESS_DEVICE_URL!); statusUrl.pathname = "/status";
     assert.equal((await fetch(statusUrl)).status, 403);
     const status = await (await fetch(statusUrl, { headers: { authorization: `Bearer ${env.HARNESS_DEVICE_TOKEN}` } })).json() as { name: string; host: string; status: string; connectionId: string };
@@ -74,7 +74,7 @@ test("PICOS CLI sends exact commands, preserves config mode and lets Pi reply", 
     const stale = await fetch(env.HARNESS_DEVICE_URL!, { method: "POST", headers: { authorization: `Bearer ${env.HARNESS_DEVICE_TOKEN}`, "content-type": "application/json" }, body: JSON.stringify({ connectionId: "old", command: "danger" }) });
     assert.match(await stale.text(), /connection changed/);
     assert.deepEqual(wire, ["configure\r"], "A stale device token must not send a command");
-    adapter = new PiRpcAdapter({ harnessSessionId: "picos", piSessionId: randomUUID(), projectDir: process.cwd(), sessionDir: join(root, "sessions"),
+    adapter = new PiRpcAdapter({ harnessSessionId: "device", piSessionId: randomUUID(), projectDir: process.cwd(), sessionDir: join(root, "sessions"),
       piPath: process.execPath, piExecutableArgs: [resolve("node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js")],
       piEnv: { ...env, PI_CODING_AGENT_DIR: join(root, "agent"), DEVICE_PROBE_PRODUCTION: "1" },
       extraArgs: ["--no-mcp", "--no-skills", "--no-prompt-templates", "--extension", resolve("fixtures/extensions/device-feasibility.ts"), "--extension", resolve("dist/runtime/device-tools.js"), "--provider", "device-probe", "--model", "fixture", "--tools", "device_exec"],
@@ -97,10 +97,10 @@ test("PICOS CLI sends exact commands, preserves config mode and lets Pi reply", 
     assert.ok(visible.some((item) => item.kind === "assistant" && item.text.includes("Device observation received")));
     const messages = JSON.stringify(await adapter.getMessages());
     assert.match(messages, /mode=configuration/);
-    broker.rename("picos", "新名称");
+    broker.rename("device", "新名称");
     assert.equal((await (await fetch(statusUrl, { headers: { authorization: `Bearer ${env.HARNESS_DEVICE_TOKEN}` } })).json() as { name: string }).name, "新名称");
     assert.doesNotMatch(messages, /Exit code: 0/);
-    const errorResult = await broker.run("picos", "invalid-command", "user");
+    const errorResult = await broker.run("device", "invalid-command", "user");
     assert.equal(errorResult.exitCode, undefined, "A CLI prompt is not a successful exit status");
   } finally {
     await adapter?.dispose(); broker.dispose();
@@ -113,6 +113,7 @@ test("production SSH broker and Pi tool share a real persistent shell and stream
   const root = await mkdtemp(join(tmpdir(), "pideck-ssh-test-"));
   const connections = new Set<Connection>();
   let shells = 0;
+  const shellProcesses = new Set<ReturnType<typeof spawn>>();
   const server = new Server({ hostKeys: [generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey.export({ type: "pkcs1", format: "pem" }) as Buffer] }, (connection) => {
     connections.add(connection); connection.on("close", () => connections.delete(connection)); connection.on("error", () => {});
     connection.on("authentication", (ctx) => ctx.method === "password" && ctx.password === "test-only-password" ? ctx.accept() : ctx.reject());
@@ -121,6 +122,8 @@ test("production SSH broker and Pi tool share a real persistent shell and stream
       session.on("shell", (acceptShell) => {
         const channel = acceptShell(); shells++;
         const child = spawn(shellPath, ["--noprofile", "--norc", "-i"], { stdio: "pipe", env: { ...process.env, BASH_ENV: "", PS1: "test@host:~$ ", TERM: "dumb" } });
+        shellProcesses.add(child);
+        child.once("exit", () => shellProcesses.delete(child));
         channel.on("data", (chunk: Buffer) => child.stdin.write(chunk.toString().replace(/\r/g, "\n"))); child.stdout.pipe(channel); child.stderr.pipe(channel, { end: false });
         child.stdin.on("error", () => {}); child.on("error", () => channel.close());
         child.on("close", () => channel.close()); channel.on("close", () => child.kill());
@@ -184,6 +187,7 @@ test("production SSH broker and Pi tool share a real persistent shell and stream
     try { await assert.rejects(denied.connect("denied", config), /SSH/); } finally { denied.dispose(); }
   } finally {
     await adapter?.dispose(); broker.dispose();
+    for (const child of shellProcesses) child.kill("SIGKILL");
     for (const connection of connections) connection.end();
     server.close(); await rm(root, { recursive: true, force: true });
   }

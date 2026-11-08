@@ -60,3 +60,33 @@ test("handles absent files and invalid connection schemas", async () => {
     assert.equal(result.warnings[0]?.path, join(project, ".pi", "mcp.json"));
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+test("reports when a default skill would shadow a bundled skill", async () => {
+  const root = await mkdtemp(join(tmpdir(), "harness-skill-collision-"));
+  try {
+    const agent = join(root, "agent"), project = join(root, "project"), bundled = join(root, "bundled", "shared", "SKILL.md");
+    await mkdir(join(agent, "skills", "shared"), { recursive: true });
+    await mkdir(join(root, "bundled", "shared"), { recursive: true });
+    await mkdir(project);
+    const definition = "---\nname: shared\ndescription: Fixture skill\n---\nFixture\n";
+    await writeFile(join(agent, "skills", "shared", "SKILL.md"), definition);
+    await writeFile(bundled, definition);
+    const result = await discoverWorkspace(project, agent, [bundled]);
+    assert.equal(result.warnings.length, 1);
+    assert.match(result.warnings[0]!.message, /collision.*shared/i);
+    assert.equal(result.warnings[0]!.path, bundled);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("checks executable presence on a supplied PATH", async () => {
+  const { executableAvailable } = await import("./workspace-discovery.js");
+  const { chmod } = await import("node:fs/promises");
+  const root = await mkdtemp(join(tmpdir(), "harness-bin-check-"));
+  try {
+    const filename = process.platform === "win32" ? "fixture.EXE" : "fixture";
+    await writeFile(join(root, filename), "fixture");
+    if (process.platform !== "win32") await chmod(join(root, filename), 0o755);
+    assert.equal(await executableAvailable("fixture", root), true);
+    assert.equal(await executableAvailable("missing", root), false);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

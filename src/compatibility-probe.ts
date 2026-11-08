@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { PiRpcAdapter } from "./runtime/pi-rpc-adapter.js";
@@ -7,7 +7,9 @@ import type { RpcRecord, RuntimeEvent } from "./runtime/types.js";
 
 const root = await mkdtemp(join(tmpdir(), "minimal-pi-compat-"));
 const extensionPath = resolve("fixtures/extensions/compatibility.ts");
-const skillPath = resolve("fixtures/skills/harness-probe/SKILL.md");
+const skillPath = join(root, "skills", "harness-probe", "SKILL.md");
+await mkdir(join(root, "skills", "harness-probe"), { recursive: true });
+await writeFile(skillPath, "---\nname: harness-probe\ndescription: Minimal skill used to verify Pi skill discovery in Minimal Pi Harness.\n---\n\n# Harness Probe\n\nWhen explicitly invoked, reply with `HARNESS_SKILL_OK` and do not use tools.\n");
 const adapter = new PiRpcAdapter({
   harnessSessionId: "compatibility-probe",
   piSessionId: "compatibility-probe",
